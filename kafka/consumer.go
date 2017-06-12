@@ -9,6 +9,13 @@ import (
 	"github.com/wvanbergen/kazoo-go"
 )
 
+type ConsumerGrouper interface {
+	Errors() <-chan error
+	Messages() <-chan *sarama.ConsumerMessage
+	CommitUpto(message *sarama.ConsumerMessage) error
+	Close() error
+}
+
 type Consumer interface {
 	StartListening(messageHandler func(message FTMessage) error)
 	Shutdown()
@@ -18,7 +25,7 @@ type MessageConsumer struct {
 	topics         []string
 	consumerGroup  string
 	zookeeperNodes []string
-	consumer       *consumergroup.ConsumerGroup
+	consumer       ConsumerGrouper
 }
 
 func NewConsumer(zookeeperConnectionString string, consumerGroup string, topics []string, config *consumergroup.Config) (Consumer, error) {
