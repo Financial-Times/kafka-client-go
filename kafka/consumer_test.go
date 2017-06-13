@@ -65,7 +65,11 @@ func (cg *MockConsumerGroup) CommitUpto(message *sarama.ConsumerMessage) error {
 	return nil
 }
 func (cg *MockConsumerGroup) Close() error {
+	cg.IsShutdown = true
 	return nil
+}
+func (cg *MockConsumerGroup) Closed() bool {
+	return cg.IsShutdown
 }
 
 func NewTestConsumer() Consumer {
@@ -90,4 +94,13 @@ func TestMessageConsumer_StartListening(t *testing.T) {
 	})
 	time.Sleep(1 * time.Second)
 	assert.Equal(t, 2, count)
+}
+
+func TestMessageConsumer_ConnectivityCheck(t *testing.T) {
+	tc := NewTestConsumer()
+	err := tc.ConnectivityCheck()
+	assert.NoError(t, err)
+	tc.Shutdown()
+	err = tc.ConnectivityCheck()
+	assert.Error(t, err)
 }
