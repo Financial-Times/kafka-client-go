@@ -3,6 +3,8 @@ package kafka
 import (
 	"time"
 
+	"errors"
+
 	"github.com/Shopify/sarama"
 	log "github.com/Sirupsen/logrus"
 	"github.com/wvanbergen/kafka/consumergroup"
@@ -14,11 +16,13 @@ type ConsumerGrouper interface {
 	Messages() <-chan *sarama.ConsumerMessage
 	CommitUpto(message *sarama.ConsumerMessage) error
 	Close() error
+	Closed() bool
 }
 
 type Consumer interface {
 	StartListening(messageHandler func(message FTMessage) error)
 	Shutdown()
+	ConnectivityCheck() error
 }
 
 type MessageConsumer struct {
@@ -78,6 +82,13 @@ func (c *MessageConsumer) Shutdown() {
 	if err := c.consumer.Close(); err != nil {
 		log.WithError(err).WithField("method", "Shutdown").Error("Error closing the consumer")
 	}
+}
+
+func (c *MessageConsumer) ConnectivityCheck() error {
+	if c.consumer.Closed() {
+		return errors.New("No connection to Kafka")
+	}
+	return nil
 }
 
 func DefaultConsumerConfig() *consumergroup.Config {
