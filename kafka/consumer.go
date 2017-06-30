@@ -34,7 +34,7 @@ type MessageConsumer struct {
 
 func NewConsumer(zookeeperConnectionString string, consumerGroup string, topics []string, config *consumergroup.Config) (Consumer, error) {
 
-	if config != nil {
+	if config == nil {
 		config = DefaultConsumerConfig()
 	}
 
