@@ -3,8 +3,6 @@ package kafka
 import (
 	"time"
 
-	"errors"
-
 	"github.com/Shopify/sarama"
 	log "github.com/Sirupsen/logrus"
 	"github.com/wvanbergen/kafka/consumergroup"
@@ -30,6 +28,7 @@ type MessageConsumer struct {
 	consumerGroup  string
 	zookeeperNodes []string
 	consumer       ConsumerGrouper
+	config         *consumergroup.Config
 }
 
 func NewConsumer(zookeeperConnectionString string, consumerGroup string, topics []string, config *consumergroup.Config) (Consumer, error) {
@@ -53,6 +52,7 @@ func NewConsumer(zookeeperConnectionString string, consumerGroup string, topics 
 		consumerGroup:  consumerGroup,
 		zookeeperNodes: zookeeperNodes,
 		consumer:       consumer,
+		config:         config,
 	}, nil
 }
 
@@ -85,9 +85,17 @@ func (c *MessageConsumer) Shutdown() {
 }
 
 func (c *MessageConsumer) ConnectivityCheck() error {
-	if c.consumer.Closed() {
-		return errors.New("No connection to Kafka")
+	client, err := sarama.NewClient(c.zookeeperNodes, c.config.Config)
+	if err != nil {
+		return err
 	}
+	defer client.Close()
+
+	_, err = client.Topics()
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
