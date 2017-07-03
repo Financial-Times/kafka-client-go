@@ -85,7 +85,18 @@ func (c *MessageConsumer) Shutdown() {
 }
 
 func (c *MessageConsumer) ConnectivityCheck() error {
-	client, err := sarama.NewClient(c.zookeeperNodes, c.config.Config)
+
+	kz, err := kazoo.NewKazoo(c.zookeeperNodes, kazoo.NewConfig())
+	if err != nil {
+		return err
+	}
+
+	bl, err := kz.BrokerList()
+	if err != nil {
+		return err
+	}
+
+	client, err := sarama.NewClient(bl, c.config.Config)
 	if err != nil {
 		return err
 	}

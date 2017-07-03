@@ -17,13 +17,13 @@ type MessageProducer struct {
 	producer sarama.SyncProducer
 }
 
-func NewProducer(brokers string, topic string) (Producer, error) {
+func NewProducer(brokers string, topic string, config *sarama.Config) (Producer, error) {
+
+	if config == nil {
+		config = DefaultProducerConfig()
+	}
+
 	brokerSlice := strings.Split(brokers, ",")
-	config := sarama.NewConfig()
-	config.Producer.RequiredAcks = sarama.WaitForAll
-	config.Producer.Retry.Max = 10
-	config.Producer.Return.Successes = true
-	config.Producer.Return.Errors = true
 
 	sp, err := sarama.NewSyncProducer(brokerSlice, config)
 	if err != nil {
@@ -47,4 +47,13 @@ func (c *MessageProducer) SendMessage(message FTMessage) error {
 		log.WithError(err).WithField("method", "SendMessage").Error("Error sending a Kafka message")
 	}
 	return err
+}
+
+func DefaultProducerConfig() *sarama.Config {
+	config := sarama.NewConfig()
+	config.Producer.RequiredAcks = sarama.WaitForAll
+	config.Producer.Retry.Max = 10
+	config.Producer.Return.Successes = true
+	config.Producer.Return.Errors = true
+	return config
 }
