@@ -100,7 +100,4 @@ func TestMessageConsumer_ConnectivityCheck(t *testing.T) {
 	tc := NewTestConsumer()
 	err := tc.ConnectivityCheck()
 	assert.NoError(t, err)
-	tc.Shutdown()
-	err = tc.ConnectivityCheck()
-	assert.Error(t, err)
 }

@@ -26,7 +26,7 @@ func NewTestProducer(t *testing.T, brokers string, topic string) (Producer, erro
 
 func Test_NewKafkaClient_BrokerError(t *testing.T) {
 
-	_, err := NewProducer(testBrokers, testTopic)
+	_, err := NewProducer(testBrokers, testTopic, DefaultProducerConfig())
 
 	assert.Error(t, err)
 }
