@@ -86,26 +86,11 @@ func (c *MessageConsumer) Shutdown() {
 
 func (c *MessageConsumer) ConnectivityCheck() error {
 
-	kz, err := kazoo.NewKazoo(c.zookeeperNodes, kazoo.NewConfig())
-	if err != nil {
-		return err
-	}
-
-	bl, err := kz.BrokerList()
-	if err != nil {
-		return err
-	}
-
-	client, err := sarama.NewClient(bl, c.config.Config)
-	if err != nil {
-		return err
-	}
-	defer client.Close()
-
-	_, err = client.Topics()
-	if err != nil {
-		return err
-	}
+	// The underlying library being used for consumer groups has limited ability to
+	// access the client and check that the connection is still ok.  As such, this
+	// check is left empty for now, until Kafka is upgraded.
+	// Implementations can use this with confidence that the signature will not change
+	// unless a new major version is released.
 
 	return nil
 }
