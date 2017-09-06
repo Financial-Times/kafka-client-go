@@ -1,6 +1,7 @@
 package kafka
 
 import (
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -86,14 +87,16 @@ func NewTestConsumer() Consumer {
 }
 
 func TestMessageConsumer_StartListening(t *testing.T) {
-	count := 0
+	var count int32
 	consumer := NewTestConsumer()
 	consumer.StartListening(func(msg FTMessage) error {
-		count++
+		atomic.AddInt32(&count, 1)
 		return nil
 	})
 	time.Sleep(1 * time.Second)
-	assert.Equal(t, 2, count)
+	var expected int32
+	expected = 2
+	assert.Equal(t, expected, atomic.LoadInt32(&count))
 }
 
 func TestMessageConsumer_ConnectivityCheck(t *testing.T) {

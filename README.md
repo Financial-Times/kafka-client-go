@@ -35,3 +35,5 @@ kc.Shutdown()
 ```
 
 
+## Testing
+Some tests in this project require a local Zookeeper/Kafka. To omit these tests, use the `-short` option.
