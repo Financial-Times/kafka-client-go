@@ -8,10 +8,7 @@ jobs:
           GOPATH: /go
           CIRCLE_TEST_REPORTS: /tmp/test-results
           CIRCLE_COVERAGE_REPORT: /tmp/coverage-results
-      - image: wurstmeister/zookeeper
-      - image: wurstmeister/kafka:0.8.2.0
-        volumes:
-          - /var/run/docker.sock:/var/run/docker.sock
+      - image: blacktop/kafka:0.8
     steps:
       - checkout
       - run:
