@@ -10,6 +10,8 @@ jobs:
           CIRCLE_COVERAGE_REPORT: /tmp/coverage-results
       - image: wurstmeister/zookeeper
       - image: wurstmeister/kafka:0.8.2.0
+        volumes:
+          - /var/run/docker.sock:/var/run/docker.sock
     steps:
       - checkout
       - run:
