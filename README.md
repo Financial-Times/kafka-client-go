@@ -34,6 +34,8 @@ Make sure to close it when the app is shutting down.
 kc.Shutdown()
 ```
 
+### Perseverant Implementations
+The library also provides perseverant implementations of the Consumer and Producer interfaces. These keep trying to establish connections to Kafka and Zookeeper until successful. Attempting to consume or produce messages, or calling the connectivity check methods, will fail if no connection has yet been established.
 
 ## Testing
-Some tests in this project require a local Zookeeper/Kafka. To omit these tests, use the `-short` option.
+Some tests in this project require a local Zookeeper (port 2181) / Kafka (port 9092). To omit these tests, use the `-short` option.

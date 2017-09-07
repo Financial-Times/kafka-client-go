@@ -1,6 +1,8 @@
 package kafka
 
 import (
+	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -11,7 +13,7 @@ import (
 	"github.com/wvanbergen/kafka/consumergroup"
 )
 
-var (
+const (
 	zookeeperConnectionString = "127.0.0.1:2181"
 	testConsumerGroup         = "testgroup"
 )
@@ -24,9 +26,56 @@ func TestNewConsumer(t *testing.T) {
 	config.Offsets.Initial = sarama.OffsetNewest
 	config.Offsets.ProcessingTimeout = 10 * time.Second
 
-	_, err := NewConsumer(zookeeperConnectionString, testConsumerGroup, []string{testTopic}, config)
+	consumer, err := NewConsumer(zookeeperConnectionString, testConsumerGroup, []string{testTopic}, config)
 	assert.NoError(t, err)
 
+	err = consumer.ConnectivityCheck()
+	assert.NoError(t, err)
+
+	consumer.Shutdown()
+}
+
+func TestNewPerseverantConsumer(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping test as it requires a connection to Zookeeper.")
+	}
+
+	consumer, err := NewPerseverantConsumer(zookeeperConnectionString, testConsumerGroup, []string{testTopic}, nil, 0, time.Second)
+	assert.NoError(t, err)
+
+	consumer.Shutdown()
+}
+
+func TestNewPerseverantConsumerNotConnected(t *testing.T) {
+	server := httptest.NewServer(nil)
+	zkUrl := server.URL[strings.LastIndex(server.URL, "/")+1:]
+	server.Close()
+
+	consumer, err := NewPerseverantConsumer(zkUrl, testConsumerGroup, []string{testTopic}, nil, 0, time.Second)
+	assert.NoError(t, err)
+
+	err = consumer.ConnectivityCheck()
+	assert.EqualError(t, err, errConsumerNotConnected)
+
+	consumer.Shutdown()
+}
+
+func TestNewPerseverantConsumerWithInitialDelay(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping test as it requires a connection to Zookeeper.")
+	}
+
+	consumer, err := NewPerseverantConsumer(zookeeperConnectionString, testConsumerGroup, []string{testTopic}, nil, time.Second, time.Second)
+	assert.NoError(t, err)
+
+	err = consumer.ConnectivityCheck()
+	assert.EqualError(t, err, errConsumerNotConnected)
+
+	time.Sleep(2 * time.Second)
+	err = consumer.ConnectivityCheck()
+	assert.NoError(t, err)
+
+	consumer.Shutdown()
 }
 
 type MockConsumerGroup struct {
@@ -97,10 +146,4 @@ func TestMessageConsumer_StartListening(t *testing.T) {
 	var expected int32
 	expected = 2
 	assert.Equal(t, expected, atomic.LoadInt32(&count))
-}
-
-func TestMessageConsumer_ConnectivityCheck(t *testing.T) {
-	tc := NewTestConsumer()
-	err := tc.ConnectivityCheck()
-	assert.NoError(t, err)
 }
