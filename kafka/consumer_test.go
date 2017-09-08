@@ -35,6 +35,17 @@ func TestNewConsumer(t *testing.T) {
 	consumer.Shutdown()
 }
 
+func TestConsumerNotConnectedConnectivityCheckError(t *testing.T) {
+	server := httptest.NewServer(nil)
+	zkUrl := server.URL[strings.LastIndex(server.URL, "/")+1:]
+	server.Close()
+
+	consumer := MessageConsumer{zookeeperNodes:[]string{zkUrl}, consumerGroup:testConsumerGroup, topics:[]string{testTopic}, config:nil}
+
+	err := consumer.ConnectivityCheck()
+	assert.Error(t, err)
+}
+
 func TestNewPerseverantConsumer(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping test as it requires a connection to Zookeeper.")
@@ -146,4 +157,32 @@ func TestMessageConsumer_StartListening(t *testing.T) {
 	var expected int32
 	expected = 2
 	assert.Equal(t, expected, atomic.LoadInt32(&count))
+}
+
+func TestMessageConsumerContinuesWhenHandlerReturnsError(t *testing.T) {
+	var count int32
+	consumer := NewTestConsumer()
+	consumer.StartListening(func(msg FTMessage) error {
+		atomic.AddInt32(&count, 1)
+		return errors.New("test error")
+	})
+	time.Sleep(1 * time.Second)
+	var expected int32
+	expected = 2
+	assert.Equal(t, expected, atomic.LoadInt32(&count))
+}
+
+func TestPerseverantConsumerListensToConsumer(t *testing.T) {
+	var count int32
+	consumer := perseverantConsumer{consumer: NewTestConsumer()}
+	consumer.StartListening(func(msg FTMessage) error {
+		atomic.AddInt32(&count, 1)
+		return nil
+	})
+	time.Sleep(1 * time.Second)
+	var expected int32
+	expected = 2
+	assert.Equal(t, expected, atomic.LoadInt32(&count))
+
+	consumer.Shutdown()
 }
