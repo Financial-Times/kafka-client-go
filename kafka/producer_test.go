@@ -30,6 +30,10 @@ func (p *mockProducer) ConnectivityCheck() error {
 	return args.Error(0)
 }
 
+func (p *mockProducer) Shutdown() {
+	p.Called()
+}
+
 func NewTestProducer(t *testing.T, brokers string, topic string) (Producer, error) {
 	msp := mocks.NewSyncProducer(t, nil)
 	brokerSlice := strings.Split(brokers, ",")
@@ -85,7 +89,7 @@ func TestNewPerseverantProducer(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestNewPerseverantProducrNotConnected(t *testing.T) {
+func TestNewPerseverantProducerNotConnected(t *testing.T) {
 	server := httptest.NewServer(nil)
 	kUrl := server.URL[strings.LastIndex(server.URL, "/")+1:]
 	server.Close()
@@ -116,6 +120,8 @@ func TestNewPerseverantProducerWithInitialDelay(t *testing.T) {
 func TestPerseverantProducerForwardsToProducer(t *testing.T) {
 	mp := mockProducer{}
 	mp.On("SendMessage", mock.AnythingOfType("kafka.FTMessage")).Return(nil)
+	mp.On("Shutdown").Return()
+
 	p := perseverantProducer{producer: &mp}
 
 	msg := FTMessage{
@@ -127,6 +133,9 @@ func TestPerseverantProducerForwardsToProducer(t *testing.T) {
 
 	actual := p.SendMessage(msg)
 	assert.NoError(t, actual)
+
+	p.Shutdown()
+
 	mp.AssertExpectations(t)
 }
 

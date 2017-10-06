@@ -15,6 +15,7 @@ const errProducerNotConnected = "producer is not connected to Kafka"
 type Producer interface {
 	SendMessage(message FTMessage) error
 	ConnectivityCheck() error
+	Shutdown()
 }
 
 type MessageProducer struct {
@@ -78,9 +79,18 @@ func (p *MessageProducer) SendMessage(message FTMessage) error {
 	return err
 }
 
+func (p *MessageProducer) Shutdown() {
+	if err := p.producer.Close(); err != nil {
+		log.WithError(err).WithField("method", "Shutdown").Error("Error closing the producer")
+	}
+}
+
 func (p *MessageProducer) ConnectivityCheck() error {
 	// like the consumer check, establishing a new connection gives us some degree of confidence
-	_, err := NewProducer(strings.Join(p.brokers, ","), p.topic, p.config)
+	tmp, err := NewProducer(strings.Join(p.brokers, ","), p.topic, p.config)
+	if tmp != nil {
+		defer tmp.Shutdown()
+	}
 
 	return err
 }
@@ -125,14 +135,18 @@ func (p *perseverantProducer) SendMessage(message FTMessage) error {
 	return p.producer.SendMessage(message)
 }
 
+func (p *perseverantProducer) Shutdown() {
+	if p.isConnected() {
+		p.producer.Shutdown()
+	}
+}
+
 func (p *perseverantProducer) ConnectivityCheck() error {
 	if !p.isConnected() {
 		return errors.New(errProducerNotConnected)
 	}
 
-	_, err := NewProducer(p.brokers, p.topic, p.config)
-
-	return err
+	return p.producer.ConnectivityCheck()
 }
 
 func DefaultProducerConfig() *sarama.Config {
