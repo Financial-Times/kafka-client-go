@@ -40,7 +40,7 @@ func TestConsumerNotConnectedConnectivityCheckError(t *testing.T) {
 	zkUrl := server.URL[strings.LastIndex(server.URL, "/")+1:]
 	server.Close()
 
-	consumer := MessageConsumer{zookeeperNodes:[]string{zkUrl}, consumerGroup:testConsumerGroup, topics:[]string{testTopic}, config:nil}
+	consumer := MessageConsumer{zookeeperNodes: []string{zkUrl}, consumerGroup: testConsumerGroup, topics: []string{testTopic}, config: nil}
 
 	err := consumer.ConnectivityCheck()
 	assert.Error(t, err)
@@ -51,40 +51,20 @@ func TestNewPerseverantConsumer(t *testing.T) {
 		t.Skip("Skipping test as it requires a connection to Zookeeper.")
 	}
 
-	consumer, err := NewPerseverantConsumer(zookeeperConnectionString, testConsumerGroup, []string{testTopic}, nil, 0, time.Second)
-	assert.NoError(t, err)
-
-	consumer.Shutdown()
-}
-
-func TestNewPerseverantConsumerNotConnected(t *testing.T) {
-	server := httptest.NewServer(nil)
-	zkUrl := server.URL[strings.LastIndex(server.URL, "/")+1:]
-	server.Close()
-
-	consumer, err := NewPerseverantConsumer(zkUrl, testConsumerGroup, []string{testTopic}, nil, 0, time.Second)
+	consumer, err := NewPerseverantConsumer(zookeeperConnectionString, testConsumerGroup, []string{testTopic}, nil, time.Second)
 	assert.NoError(t, err)
 
 	err = consumer.ConnectivityCheck()
 	assert.EqualError(t, err, errConsumerNotConnected)
 
-	consumer.Shutdown()
-}
-
-func TestNewPerseverantConsumerWithInitialDelay(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping test as it requires a connection to Zookeeper.")
-	}
-
-	consumer, err := NewPerseverantConsumer(zookeeperConnectionString, testConsumerGroup, []string{testTopic}, nil, time.Second, time.Second)
-	assert.NoError(t, err)
+	consumer.StartListening(func(msg FTMessage) error {return nil})
 
 	err = consumer.ConnectivityCheck()
-	assert.EqualError(t, err, errConsumerNotConnected)
-
-	time.Sleep(2 * time.Second)
-	err = consumer.ConnectivityCheck()
 	assert.NoError(t, err)
+
+	// avoid race condition within consumer_group library by delaying the shutdown
+	// (it's not a normal case to create a consumer and immediately close it)
+	time.Sleep(time.Second)
 
 	consumer.Shutdown()
 }
