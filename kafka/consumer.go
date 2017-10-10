@@ -43,6 +43,7 @@ type perseverantConsumer struct {
 	topics                    []string
 	config                    *consumergroup.Config
 	consumer                  Consumer
+	retryInterval             time.Duration
 }
 
 func NewConsumer(zookeeperConnectionString string, consumerGroup string, topics []string, config *consumergroup.Config) (Consumer, error) {
@@ -53,7 +54,7 @@ func NewConsumer(zookeeperConnectionString string, consumerGroup string, topics 
 		config.Zookeeper.Chroot = chroot
 	} else if config.Zookeeper.Chroot != chroot {
 		log.WithFields(log.Fields{
-			"method":            "NewConsumer",
+			"method":           "NewConsumer",
 			"configuredChroot": config.Zookeeper.Chroot,
 			"parsedChroot":     chroot,
 		}).Error("Mismatch in Zookeeper config while creating Kafka consumer")
@@ -75,16 +76,8 @@ func NewConsumer(zookeeperConnectionString string, consumerGroup string, topics 
 	}, nil
 }
 
-func NewPerseverantConsumer(zookeeperConnectionString string, consumerGroup string, topics []string, config *consumergroup.Config, initialDelay time.Duration, retryInterval time.Duration) (Consumer, error) {
-	consumer := &perseverantConsumer{sync.RWMutex{}, zookeeperConnectionString, consumerGroup, topics, config, nil}
-
-	go func() {
-		if initialDelay > 0 {
-			time.Sleep(initialDelay)
-		}
-		consumer.connect(retryInterval)
-	}()
-
+func NewPerseverantConsumer(zookeeperConnectionString string, consumerGroup string, topics []string, config *consumergroup.Config, retryInterval time.Duration) (Consumer, error) {
+	consumer := &perseverantConsumer{sync.RWMutex{}, zookeeperConnectionString, consumerGroup, topics, config, nil, retryInterval}
 	return consumer, nil
 }
 
@@ -128,7 +121,7 @@ func (c *MessageConsumer) ConnectivityCheck() error {
 	return nil
 }
 
-func (c *perseverantConsumer) connect(retryInterval time.Duration) {
+func (c *perseverantConsumer) connect() {
 	connectorLog := log.WithField("zookeeper", c.zookeeperConnectionString).WithField("topics", c.topics).WithField("consumerGroup", c.consumerGroup)
 	for {
 		consumer, err := NewConsumer(c.zookeeperConnectionString, c.consumerGroup, c.topics, c.config)
@@ -139,7 +132,7 @@ func (c *perseverantConsumer) connect(retryInterval time.Duration) {
 		}
 
 		connectorLog.WithError(err).Warn(errConsumerNotConnected)
-		time.Sleep(retryInterval)
+		time.Sleep(c.retryInterval)
 	}
 }
 
@@ -159,7 +152,7 @@ func (c *perseverantConsumer) isConnected() bool {
 
 func (c *perseverantConsumer) StartListening(messageHandler func(message FTMessage) error) {
 	if !c.isConnected() {
-		c.connect(time.Minute)
+		c.connect()
 	}
 
 	c.RLock()
