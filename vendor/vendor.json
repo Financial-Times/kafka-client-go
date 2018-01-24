@@ -123,10 +123,10 @@
 			"revisionTime": "2016-09-27T09:30:20Z"
 		},
 		{
-			"checksumSHA1": "fb7gTGSTMhMnSDN7pIjv8MbG3F4=",
+			"checksumSHA1": "aEmap4x1keixP+5COzkKaJjNrLI=",
 			"path": "github.com/wvanbergen/kazoo-go",
-			"revision": "968957352185472eacb69215fa3dbfcfdbac1096",
-			"revisionTime": "2016-09-30T07:24:34Z"
+			"revision": "2da972bbd3bafbae02dcd0cb755d63c09a9a504d",
+			"revisionTime": "2017-10-10T15:41:45Z"
 		},
 		{
 			"checksumSHA1": "nqWNlnMmVpt628zzvyo6Yv2CX5Q=",
@@ -135,7 +135,7 @@
 			"revisionTime": "2017-08-25T20:24:07Z"
 		},
 		{
-			"checksumSHA1": "KqOZbEWiXVGUp0TMR58UCpVB9+4=",
+			"checksumSHA1": "NCjxmUUgENsdpvPnlk5rBOcSHHU=",
 			"path": "golang.org/x/sys/unix",
 			"revision": "9aade4d3a3b7e6d876cd3823ad20ec45fc035402",
 			"revisionTime": "2017-09-05T23:24:40Z"
