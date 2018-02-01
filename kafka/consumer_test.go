@@ -26,7 +26,12 @@ func TestNewConsumer(t *testing.T) {
 	config.Offsets.Initial = sarama.OffsetNewest
 	config.Offsets.ProcessingTimeout = 10 * time.Second
 
-	consumer, err := NewConsumer(zookeeperConnectionString, testConsumerGroup, []string{testTopic}, config)
+	consumer, err := NewConsumer(Config{
+		ZookeeperConnectionString: zookeeperConnectionString,
+		ConsumerGroup:             testConsumerGroup,
+		Topics:                    []string{testTopic},
+		ConsumerGroupConfig:       config,
+	})
 	assert.NoError(t, err)
 
 	err = consumer.ConnectivityCheck()
@@ -57,7 +62,7 @@ func TestNewPerseverantConsumer(t *testing.T) {
 	err = consumer.ConnectivityCheck()
 	assert.EqualError(t, err, errConsumerNotConnected)
 
-	consumer.StartListening(func(msg FTMessage) error {return nil})
+	consumer.StartListening(func(msg FTMessage) error { return nil })
 
 	err = consumer.ConnectivityCheck()
 	assert.NoError(t, err)
