@@ -142,7 +142,6 @@ func (c *MessageConsumer) ConnectivityCheck() error {
 		ConsumerGroup:             c.consumerGroup + "-healthcheck",
 		Topics:                    c.topics,
 		ConsumerGroupConfig:       c.config,
-		Err:                       c.errCh,
 	}
 	healthcheckConsumer, err := NewConsumer(config)
 	if err != nil {
