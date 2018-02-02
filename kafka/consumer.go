@@ -76,15 +76,6 @@ func NewConsumer(config Config) (Consumer, error) {
 		return nil, err
 	}
 
-	if config.Err == nil {
-		config.Err = make(chan error, 2)
-		go func() {
-			for range config.Err {
-				//just ignore
-			}
-		}()
-	}
-
 	return &MessageConsumer{
 		topics:         config.Topics,
 		consumerGroup:  config.ConsumerGroup,
@@ -104,7 +95,9 @@ func (c *MessageConsumer) StartListening(messageHandler func(message FTMessage) 
 	go func() {
 		for err := range c.consumer.Errors() {
 			log.WithError(err).WithField("method", "StartListening").Error("Error proccessing message")
-			c.errCh <- err
+			if c.errCh != nil {
+				c.errCh <- err
+			}
 		}
 	}()
 
@@ -113,12 +106,16 @@ func (c *MessageConsumer) StartListening(messageHandler func(message FTMessage) 
 			ftMsg, err := rawToFTMessage(message.Value)
 			if err != nil {
 				log.WithError(err).WithField("method", "StartListening").Error("Error converting Kafka message body to FTMessage")
-				c.errCh <- err
+				if c.errCh != nil {
+					c.errCh <- err
+				}
 			}
 			err = messageHandler(ftMsg)
 			if err != nil {
 				log.WithError(err).WithField("method", "StartListening").WithField("messageKey", message.Key).Error("Error processing message")
-				c.errCh <- err
+				if c.errCh != nil {
+					c.errCh <- err
+				}
 			}
 			c.consumer.CommitUpto(message)
 		}
@@ -128,10 +125,10 @@ func (c *MessageConsumer) StartListening(messageHandler func(message FTMessage) 
 func (c *MessageConsumer) Shutdown() {
 	if err := c.consumer.Close(); err != nil {
 		log.WithError(err).WithField("method", "Shutdown").Error("Error closing the consumer")
-		c.errCh <- err
-
+		if c.errCh != nil {
+			c.errCh <- err
+		}
 	}
-	close(c.errCh)
 }
 
 func (c *MessageConsumer) ConnectivityCheck() error {
