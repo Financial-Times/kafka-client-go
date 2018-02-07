@@ -18,6 +18,8 @@ const (
 	testConsumerGroup         = "testgroup"
 )
 
+var expectedErrors = []error{errors.New("Booster Separation Failure"), errors.New("Payload missing")}
+
 func TestNewConsumer(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping test as it requires a connection to Zookeeper.")
@@ -101,7 +103,7 @@ func TestNewPerseverantConsumer(t *testing.T) {
 
 type MockConsumerGroup struct {
 	messages        []string
-	errors          []string
+	errors          []error
 	committedCount  int
 	IsShutdown      bool
 	errorOnShutdown bool
@@ -112,7 +114,7 @@ func (cg *MockConsumerGroup) Errors() <-chan error {
 	go func() {
 		defer close(outChan)
 		for _, v := range cg.errors {
-			outChan <- errors.New(v)
+			outChan <- v
 		}
 	}()
 	return outChan
@@ -156,7 +158,23 @@ func NewTestConsumerWithErrChan() (Consumer, chan error) {
 		zookeeperNodes: []string{"node"},
 		consumer: &MockConsumerGroup{
 			messages:        []string{"Message1", "Message2"},
-			errors:          []string{},
+			errors:          []error{},
+			IsShutdown:      false,
+			errorOnShutdown: true,
+		},
+		errCh: errCh,
+	}, errCh
+}
+
+func NewTestConsumerWithErrors() (Consumer, chan error) {
+	errCh := make(chan error, 2)
+	return &MessageConsumer{
+		topics:         []string{"topic"},
+		consumerGroup:  "group",
+		zookeeperNodes: []string{"node"},
+		consumer: &MockConsumerGroup{
+			messages:        []string{"Message1", "Message2"},
+			errors:          expectedErrors,
 			IsShutdown:      false,
 			errorOnShutdown: true,
 		},
@@ -171,10 +189,32 @@ func NewTestConsumer() Consumer {
 		zookeeperNodes: []string{"node"},
 		consumer: &MockConsumerGroup{
 			messages:   []string{"Message1", "Message2"},
-			errors:     []string{},
+			errors:     []error{},
 			IsShutdown: false,
 		},
 	}
+}
+
+func TestMessageConsumer_StartListeningConsumerErrors(t *testing.T) {
+	var count int32
+	consumer, errChan := NewTestConsumerWithErrors()
+
+	var actualErrors []error
+	go func() {
+		for actualError := range errChan {
+			actualErrors = append(actualErrors, actualError)
+		}
+	}()
+
+	consumer.StartListening(func(msg FTMessage) error {
+		atomic.AddInt32(&count, 1)
+		return nil
+	})
+
+	time.Sleep(1 * time.Second)
+
+	assert.Equal(t, int32(2), atomic.LoadInt32(&count))
+	assert.Equal(t, expectedErrors, actualErrors, "Didn't get the expected errors from the consumer.")
 }
 
 func TestMessageConsumer_StartListening(t *testing.T) {
