@@ -26,18 +26,43 @@ func TestNewConsumer(t *testing.T) {
 	config.Offsets.Initial = sarama.OffsetNewest
 	config.Offsets.ProcessingTimeout = 10 * time.Second
 
+	errCh := make(chan error, 1)
+	defer close(errCh)
+
 	consumer, err := NewConsumer(Config{
 		ZookeeperConnectionString: zookeeperConnectionString,
 		ConsumerGroup:             testConsumerGroup,
 		Topics:                    []string{testTopic},
 		ConsumerGroupConfig:       config,
+		Err:                       errCh,
 	})
 	assert.NoError(t, err)
 
 	err = consumer.ConnectivityCheck()
 	assert.NoError(t, err)
 
+	select {
+	case actualError := <-errCh:
+		assert.NotNil(t, actualError, "Was not expecting error from consumer.")
+	default:
+	}
+
 	consumer.Shutdown()
+}
+
+func TestErrorDuringShutdown(t *testing.T) {
+	consumer, errCh := NewTestConsumerWithErrChan()
+	defer close(errCh)
+
+	consumer.Shutdown()
+
+	var actualError error
+	select {
+	case actualError = <-errCh:
+		assert.NotNil(t, actualError, "Was expecting non-nil error on consumer shutdown")
+	default:
+		assert.NotNil(t, actualError, "Was expecting error on consumer shutdown")
+	}
 }
 
 func TestConsumerNotConnectedConnectivityCheckError(t *testing.T) {
@@ -75,10 +100,11 @@ func TestNewPerseverantConsumer(t *testing.T) {
 }
 
 type MockConsumerGroup struct {
-	messages       []string
-	errors         []string
-	committedCount int
-	IsShutdown     bool
+	messages        []string
+	errors          []string
+	committedCount  int
+	IsShutdown      bool
+	errorOnShutdown bool
 }
 
 func (cg *MockConsumerGroup) Errors() <-chan error {
@@ -112,10 +138,30 @@ func (cg *MockConsumerGroup) CommitUpto(message *sarama.ConsumerMessage) error {
 }
 func (cg *MockConsumerGroup) Close() error {
 	cg.IsShutdown = true
+	if cg.errorOnShutdown {
+		return errors.New("foobar")
+	}
 	return nil
 }
+
 func (cg *MockConsumerGroup) Closed() bool {
 	return cg.IsShutdown
+}
+
+func NewTestConsumerWithErrChan() (Consumer, chan error) {
+	errCh := make(chan error, 1)
+	return &MessageConsumer{
+		topics:         []string{"topic"},
+		consumerGroup:  "group",
+		zookeeperNodes: []string{"node"},
+		consumer: &MockConsumerGroup{
+			messages:        []string{"Message1", "Message2"},
+			errors:          []string{},
+			IsShutdown:      false,
+			errorOnShutdown: true,
+		},
+		errCh: errCh,
+	}, errCh
 }
 
 func NewTestConsumer() Consumer {
