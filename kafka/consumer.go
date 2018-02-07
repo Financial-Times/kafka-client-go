@@ -103,14 +103,8 @@ func (c *MessageConsumer) StartListening(messageHandler func(message FTMessage) 
 
 	go func() {
 		for message := range c.consumer.Messages() {
-			ftMsg, err := rawToFTMessage(message.Value)
-			if err != nil {
-				log.WithError(err).WithField("method", "StartListening").Error("Error converting Kafka message body to FTMessage")
-				if c.errCh != nil {
-					c.errCh <- err
-				}
-			}
-			err = messageHandler(ftMsg)
+			ftMsg := rawToFTMessage(message.Value)
+			err := messageHandler(ftMsg)
 			if err != nil {
 				log.WithError(err).WithField("method", "StartListening").WithField("messageKey", message.Key).Error("Error processing message")
 				if c.errCh != nil {

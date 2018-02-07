@@ -21,8 +21,7 @@ func Test_FTMessage_Build(t *testing.T) {
 
 func TestFTMessage_Parse(t *testing.T) {
 	payload := []byte(testFTMessage)
-	ftmsg, err := rawToFTMessage(payload)
-	assert.NoError(t, err)
+	ftmsg := rawToFTMessage(payload)
 
 	assert.EqualValues(t, ftmsg.Headers, testFTMessageHeaders)
 	assert.EqualValues(t, ftmsg.Body, testFTMessageBody)
@@ -30,8 +29,7 @@ func TestFTMessage_Parse(t *testing.T) {
 
 func TestFTMessage_Parse_NoBody(t *testing.T) {
 	payload := []byte("FTMSG/1.0\ntest: test2")
-	ftmsg, err := rawToFTMessage(payload)
-	assert.NoError(t, err)
+	ftmsg := rawToFTMessage(payload)
 
 	assert.EqualValues(t, ftmsg.Headers, testFTMessageHeaders)
 	assert.EqualValues(t, ftmsg.Body, "")
@@ -39,8 +37,7 @@ func TestFTMessage_Parse_NoBody(t *testing.T) {
 
 func TestFTMessage_Parse_CRLF(t *testing.T) {
 	payload := []byte("FTMSG/1.0\ntest: test2\r\n\r\nTest Message")
-	ftmsg, err := rawToFTMessage(payload)
-	assert.NoError(t, err)
+	ftmsg := rawToFTMessage(payload)
 
 	assert.EqualValues(t, ftmsg.Headers, testFTMessageHeaders)
 	assert.EqualValues(t, ftmsg.Body, testFTMessageBody)
