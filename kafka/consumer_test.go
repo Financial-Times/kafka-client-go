@@ -217,6 +217,28 @@ func TestMessageConsumer_StartListeningConsumerErrors(t *testing.T) {
 	assert.Equal(t, expectedErrors, actualErrors, "Didn't get the expected errors from the consumer.")
 }
 
+func TestMessageConsumer_StartListeningHandlerErrors(t *testing.T) {
+	var count int32
+	consumer, errChan := NewTestConsumerWithErrChan()
+
+	var actualErrors []error
+	go func() {
+		for actualError := range errChan {
+			actualErrors = append(actualErrors, actualError)
+		}
+	}()
+
+	consumer.StartListening(func(msg FTMessage) error {
+		atomic.AddInt32(&count, 1)
+		return expectedErrors[atomic.LoadInt32(&count)-1]
+	})
+
+	time.Sleep(1 * time.Second)
+
+	assert.Equal(t, int32(2), atomic.LoadInt32(&count))
+	assert.Equal(t, expectedErrors, actualErrors, "Didn't get the expected errors from the consumer handler.")
+}
+
 func TestMessageConsumer_StartListening(t *testing.T) {
 	var count int32
 	consumer := NewTestConsumer()
