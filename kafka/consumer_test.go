@@ -198,11 +198,20 @@ func NewTestConsumer() Consumer {
 func TestMessageConsumer_StartListeningConsumerErrors(t *testing.T) {
 	var count int32
 	consumer, errChan := NewTestConsumerWithErrors()
+	defer close(errChan)
 
 	var actualErrors []error
+	stopChan := make(chan struct{})
+	stoppedChan := make(chan struct{})
 	go func() {
-		for actualError := range errChan {
-			actualErrors = append(actualErrors, actualError)
+		defer close(stoppedChan)
+		for {
+			select {
+			case actualError := <-errChan:
+				actualErrors = append(actualErrors, actualError)
+			case <-stopChan:
+				return
+			}
 		}
 	}()
 
@@ -212,7 +221,8 @@ func TestMessageConsumer_StartListeningConsumerErrors(t *testing.T) {
 	})
 
 	time.Sleep(1 * time.Second)
-
+	close(stopChan)
+	<-stoppedChan
 	assert.Equal(t, int32(2), atomic.LoadInt32(&count))
 	assert.Equal(t, expectedErrors, actualErrors, "Didn't get the expected errors from the consumer.")
 }
@@ -220,11 +230,20 @@ func TestMessageConsumer_StartListeningConsumerErrors(t *testing.T) {
 func TestMessageConsumer_StartListeningHandlerErrors(t *testing.T) {
 	var count int32
 	consumer, errChan := NewTestConsumerWithErrChan()
+	defer close(errChan)
 
 	var actualErrors []error
+	stopChan := make(chan struct{})
+	stoppedChan := make(chan struct{})
 	go func() {
-		for actualError := range errChan {
-			actualErrors = append(actualErrors, actualError)
+		defer close(stoppedChan)
+		for {
+			select {
+			case actualError := <-errChan:
+				actualErrors = append(actualErrors, actualError)
+			case <-stopChan:
+				return
+			}
 		}
 	}()
 
@@ -234,7 +253,8 @@ func TestMessageConsumer_StartListeningHandlerErrors(t *testing.T) {
 	})
 
 	time.Sleep(1 * time.Second)
-
+	close(stopChan)
+	<-stoppedChan
 	assert.Equal(t, int32(2), atomic.LoadInt32(&count))
 	assert.Equal(t, expectedErrors, actualErrors, "Didn't get the expected errors from the consumer handler.")
 }
