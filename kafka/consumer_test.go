@@ -19,6 +19,7 @@ const (
 )
 
 var expectedErrors = []error{errors.New("Booster Separation Failure"), errors.New("Payload missing")}
+var messages = []*sarama.ConsumerMessage{{Value: []byte("Message1")}, {Value: []byte("Message2")}}
 
 func TestNewConsumer(t *testing.T) {
 	if testing.Short() {
@@ -50,21 +51,6 @@ func TestNewConsumer(t *testing.T) {
 	}
 
 	consumer.Shutdown()
-}
-
-func TestErrorDuringShutdown(t *testing.T) {
-	consumer, errCh := NewTestConsumerWithErrChan()
-	defer close(errCh)
-
-	consumer.Shutdown()
-
-	var actualError error
-	select {
-	case actualError = <-errCh:
-		assert.NotNil(t, actualError, "Was expecting non-nil error on consumer shutdown")
-	default:
-		assert.NotNil(t, actualError, "Was expecting error on consumer shutdown")
-	}
 }
 
 func TestConsumerNotConnectedConnectivityCheckError(t *testing.T) {
@@ -102,7 +88,7 @@ func TestNewPerseverantConsumer(t *testing.T) {
 }
 
 type MockConsumerGroup struct {
-	messages        []string
+	messages        []*sarama.ConsumerMessage
 	errors          []error
 	committedCount  int
 	IsShutdown      bool
@@ -125,19 +111,16 @@ func (cg *MockConsumerGroup) Messages() <-chan *sarama.ConsumerMessage {
 	go func() {
 		defer close(outChan)
 		for _, v := range cg.messages {
-			outChan <- &sarama.ConsumerMessage{
-				Value: []byte(v),
-			}
+			outChan <- v
 		}
 	}()
-
 	return outChan
 }
 
 func (cg *MockConsumerGroup) CommitUpto(message *sarama.ConsumerMessage) error {
-
 	return nil
 }
+
 func (cg *MockConsumerGroup) Close() error {
 	cg.IsShutdown = true
 	if cg.errorOnShutdown {
@@ -151,13 +134,13 @@ func (cg *MockConsumerGroup) Closed() bool {
 }
 
 func NewTestConsumerWithErrChan() (Consumer, chan error) {
-	errCh := make(chan error, 1)
+	errCh := make(chan error, len(expectedErrors))
 	return &MessageConsumer{
 		topics:         []string{"topic"},
 		consumerGroup:  "group",
 		zookeeperNodes: []string{"node"},
 		consumer: &MockConsumerGroup{
-			messages:        []string{"Message1", "Message2"},
+			messages:        messages,
 			errors:          []error{},
 			IsShutdown:      false,
 			errorOnShutdown: true,
@@ -167,16 +150,15 @@ func NewTestConsumerWithErrChan() (Consumer, chan error) {
 }
 
 func NewTestConsumerWithErrors() (Consumer, chan error) {
-	errCh := make(chan error, 2)
+	errCh := make(chan error, len(expectedErrors))
 	return &MessageConsumer{
 		topics:         []string{"topic"},
 		consumerGroup:  "group",
 		zookeeperNodes: []string{"node"},
 		consumer: &MockConsumerGroup{
-			messages:        []string{"Message1", "Message2"},
-			errors:          expectedErrors,
-			IsShutdown:      false,
-			errorOnShutdown: true,
+			messages:   messages,
+			errors:     expectedErrors,
+			IsShutdown: false,
 		},
 		errCh: errCh,
 	}, errCh
@@ -188,10 +170,25 @@ func NewTestConsumer() Consumer {
 		consumerGroup:  "group",
 		zookeeperNodes: []string{"node"},
 		consumer: &MockConsumerGroup{
-			messages:   []string{"Message1", "Message2"},
+			messages:   messages,
 			errors:     []error{},
 			IsShutdown: false,
 		},
+	}
+}
+
+func TestErrorDuringShutdown(t *testing.T) {
+	consumer, errCh := NewTestConsumerWithErrChan()
+	defer close(errCh)
+
+	consumer.Shutdown()
+
+	var actualError error
+	select {
+	case actualError = <-errCh:
+		assert.NotNil(t, actualError, "Was expecting non-nil error on consumer shutdown")
+	default:
+		assert.NotNil(t, actualError, "Was expecting error on consumer shutdown")
 	}
 }
 
@@ -219,11 +216,11 @@ func TestMessageConsumer_StartListeningConsumerErrors(t *testing.T) {
 		atomic.AddInt32(&count, 1)
 		return nil
 	})
-
 	time.Sleep(1 * time.Second)
+
 	close(stopChan)
 	<-stoppedChan
-	assert.Equal(t, int32(2), atomic.LoadInt32(&count))
+	assert.Equal(t, int32(len(messages)), atomic.LoadInt32(&count))
 	assert.Equal(t, expectedErrors, actualErrors, "Didn't get the expected errors from the consumer.")
 }
 
@@ -251,11 +248,11 @@ func TestMessageConsumer_StartListeningHandlerErrors(t *testing.T) {
 		atomic.AddInt32(&count, 1)
 		return expectedErrors[atomic.LoadInt32(&count)-1]
 	})
-
 	time.Sleep(1 * time.Second)
+
 	close(stopChan)
 	<-stoppedChan
-	assert.Equal(t, int32(2), atomic.LoadInt32(&count))
+	assert.Equal(t, int32(len(messages)), atomic.LoadInt32(&count))
 	assert.Equal(t, expectedErrors, actualErrors, "Didn't get the expected errors from the consumer handler.")
 }
 
@@ -267,9 +264,7 @@ func TestMessageConsumer_StartListening(t *testing.T) {
 		return nil
 	})
 	time.Sleep(1 * time.Second)
-	var expected int32
-	expected = 2
-	assert.Equal(t, expected, atomic.LoadInt32(&count))
+	assert.Equal(t, int32(len(messages)), atomic.LoadInt32(&count))
 }
 
 func TestMessageConsumerContinuesWhenHandlerReturnsError(t *testing.T) {
@@ -280,9 +275,7 @@ func TestMessageConsumerContinuesWhenHandlerReturnsError(t *testing.T) {
 		return errors.New("test error")
 	})
 	time.Sleep(1 * time.Second)
-	var expected int32
-	expected = 2
-	assert.Equal(t, expected, atomic.LoadInt32(&count))
+	assert.Equal(t, int32(len(messages)), atomic.LoadInt32(&count))
 }
 
 func TestPerseverantConsumerListensToConsumer(t *testing.T) {
@@ -293,9 +286,7 @@ func TestPerseverantConsumerListensToConsumer(t *testing.T) {
 		return nil
 	})
 	time.Sleep(1 * time.Second)
-	var expected int32
-	expected = 2
-	assert.Equal(t, expected, atomic.LoadInt32(&count))
+	assert.Equal(t, int32(len(messages)), atomic.LoadInt32(&count))
 
 	consumer.Shutdown()
 }
