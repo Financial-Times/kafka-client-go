@@ -36,17 +36,14 @@ func (m *FTMessage) Build() string {
 	return buffer.String()
 }
 
-func rawToFTMessage(msg []byte) (FTMessage, error) {
-	var err error
+func rawToFTMessage(msg []byte) (FTMessage) {
 	ftMsg := FTMessage{}
 	raw := string(msg)
 
 	doubleNewLineStartIndex := getHeaderSectionEndingIndex(string(raw[:]))
-	if ftMsg.Headers, err = parseHeaders(string(raw[:doubleNewLineStartIndex])); err != nil {
-		return ftMsg, err
-	}
+	ftMsg.Headers = parseHeaders(string(raw[:doubleNewLineStartIndex]));
 	ftMsg.Body = strings.TrimSpace(string(raw[doubleNewLineStartIndex:]))
-	return ftMsg, nil
+	return ftMsg
 }
 
 var re = regexp.MustCompile("[\\w-]*:[\\w\\-:/. ]*")
@@ -68,7 +65,7 @@ func getHeaderSectionEndingIndex(msg string) int {
 	return len(msg)
 }
 
-func parseHeaders(msg string) (map[string]string, error) {
+func parseHeaders(msg string) (map[string]string) {
 	headerLines := re.FindAllString(msg, -1)
 
 	headers := make(map[string]string)
@@ -76,7 +73,7 @@ func parseHeaders(msg string) (map[string]string, error) {
 		key, value := parseHeader(line)
 		headers[key] = value
 	}
-	return headers, nil
+	return headers
 }
 func parseHeader(header string) (string, string) {
 	key := kre.FindString(header)
