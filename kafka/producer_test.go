@@ -58,6 +58,8 @@ func TestNewProducer(t *testing.T) {
 
 	err = producer.ConnectivityCheck()
 	assert.NoError(t, err)
+
+	assert.Equal(t, 16777216, producer.(*MessageProducer).config.Producer.MaxMessageBytes, "maximum message size using default config")
 }
 
 func TestNewProducerBadUrl(t *testing.T) {
