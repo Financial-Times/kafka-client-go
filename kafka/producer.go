@@ -151,6 +151,7 @@ func (p *perseverantProducer) ConnectivityCheck() error {
 
 func DefaultProducerConfig() *sarama.Config {
 	config := sarama.NewConfig()
+	config.Producer.MaxMessageBytes = 16777216
 	config.Producer.RequiredAcks = sarama.WaitForAll
 	config.Producer.Retry.Max = 10
 	config.Producer.Return.Successes = true
