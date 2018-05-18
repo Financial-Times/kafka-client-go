@@ -46,9 +46,9 @@ func rawToFTMessage(msg []byte) (FTMessage) {
 	return ftMsg
 }
 
-var re = regexp.MustCompile("[\\w-]*:[\\w\\-:/. ]*")
+var re = regexp.MustCompile("[\\w-]*:[\\w\\-:/.+;= ]*")
 var kre = regexp.MustCompile("[\\w-]*:")
-var vre = regexp.MustCompile(":[\\w-:/. ]*")
+var vre = regexp.MustCompile(":[\\w-:/.+;= ]*")
 
 func getHeaderSectionEndingIndex(msg string) int {
 	//FT msg format uses CRLF for line endings
