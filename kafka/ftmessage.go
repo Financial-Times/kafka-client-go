@@ -66,9 +66,7 @@ func getHeaderSectionEndingIndex(msg string) int {
 }
 
 func parseHeaders(msg string) (map[string]string) {
-	log.Info("Parsing headers: ", msg)
 	headerLines := re.FindAllString(msg, -1)
-	log.Info("Header lines: ", headerLines)
 
 	headers := make(map[string]string)
 	for _, line := range headerLines {
@@ -78,10 +76,7 @@ func parseHeaders(msg string) (map[string]string) {
 	return headers
 }
 func parseHeader(header string) (string, string) {
-	log.Info("Parsing header: ", header)
 	key := kre.FindString(header)
-	log.Info("Key for header: ", header, " ", key)
 	value := vre.FindString(header)
-	log.Info("Value for header: ", header, " ", value)
 	return key[:len(key)-1], strings.TrimSpace(value[1:])
 }
