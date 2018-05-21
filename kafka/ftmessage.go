@@ -22,15 +22,15 @@ func NewFTMessage(headers map[string]string, body string) FTMessage {
 
 func (m *FTMessage) Build() string {
 	var buffer bytes.Buffer
-	buffer.WriteString("FTMSG/1.0\n")
+	buffer.WriteString("FTMSG/1.0\r\n")
 
 	for k, v := range m.Headers {
 		buffer.WriteString(k)
 		buffer.WriteString(": ")
 		buffer.WriteString(v)
-		buffer.WriteString("\n")
+		buffer.WriteString("\r\n")
 	}
-	buffer.WriteString("\n")
+	buffer.WriteString("\r\n")
 	buffer.WriteString(m.Body)
 
 	return buffer.String()
@@ -41,7 +41,7 @@ func rawToFTMessage(msg []byte) (FTMessage) {
 	raw := string(msg)
 
 	doubleNewLineStartIndex := getHeaderSectionEndingIndex(string(raw[:]))
-	ftMsg.Headers = parseHeaders(string(raw[:doubleNewLineStartIndex]));
+	ftMsg.Headers = parseHeaders(string(raw[:doubleNewLineStartIndex]))
 	ftMsg.Body = strings.TrimSpace(string(raw[doubleNewLineStartIndex:]))
 	return ftMsg
 }
