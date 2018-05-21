@@ -28,9 +28,9 @@ func (m *FTMessage) Build() string {
 		buffer.WriteString(k)
 		buffer.WriteString(": ")
 		buffer.WriteString(v)
-		buffer.WriteString("\n")
+		buffer.WriteString("\r\n")
 	}
-	buffer.WriteString("\n")
+	buffer.WriteString("\r\n")
 	buffer.WriteString(m.Body)
 
 	return buffer.String()
