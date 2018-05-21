@@ -22,7 +22,7 @@ func NewFTMessage(headers map[string]string, body string) FTMessage {
 
 func (m *FTMessage) Build() string {
 	var buffer bytes.Buffer
-	buffer.WriteString("FTMSG/1.0\n")
+	buffer.WriteString("FTMSG/1.0\r\n")
 
 	for k, v := range m.Headers {
 		buffer.WriteString(k)

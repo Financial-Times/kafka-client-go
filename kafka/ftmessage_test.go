@@ -7,7 +7,7 @@ import (
 )
 
 var (
-	testFTMessage        = "FTMSG/1.0\ntest: test2\n\nTest Message"
+	testFTMessage        = "FTMSG/1.0\r\ntest: test2\n\nTest Message"
 	testFTMessageHeaders = map[string]string{"test": "test2"}
 	testFTMessageBody    = "Test Message"
 )
@@ -28,7 +28,7 @@ func TestFTMessage_Parse(t *testing.T) {
 }
 
 func TestFTMessage_Parse_NoBody(t *testing.T) {
-	payload := []byte("FTMSG/1.0\ntest: test2")
+	payload := []byte("FTMSG/1.0\r\ntest: test2")
 	ftmsg := rawToFTMessage(payload)
 
 	assert.EqualValues(t, ftmsg.Headers, testFTMessageHeaders)
@@ -36,7 +36,7 @@ func TestFTMessage_Parse_NoBody(t *testing.T) {
 }
 
 func TestFTMessage_Parse_CRLF(t *testing.T) {
-	payload := []byte("FTMSG/1.0\ntest: test2\r\n\r\nTest Message")
+	payload := []byte("FTMSG/1.0\r\ntest: test2\r\n\r\nTest Message")
 	ftmsg := rawToFTMessage(payload)
 
 	assert.EqualValues(t, ftmsg.Headers, testFTMessageHeaders)
