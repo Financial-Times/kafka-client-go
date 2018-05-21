@@ -41,7 +41,7 @@ func rawToFTMessage(msg []byte) (FTMessage) {
 	raw := string(msg)
 
 	doubleNewLineStartIndex := getHeaderSectionEndingIndex(string(raw[:]))
-	ftMsg.Headers = parseHeaders(string(raw[:doubleNewLineStartIndex]));
+	ftMsg.Headers = parseHeaders(string(raw[:doubleNewLineStartIndex]))
 	ftMsg.Body = strings.TrimSpace(string(raw[doubleNewLineStartIndex:]))
 	return ftMsg
 }
