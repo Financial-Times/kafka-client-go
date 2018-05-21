@@ -8,8 +8,10 @@ import (
 
 var (
 	testFTMessage        = "FTMSG/1.0\r\ntest: test2\n\nTest Message"
+	testComplexFTMessage        = "FTMSG/1.0\nContent-Type: application/vnd.ft-upp-article+json; version=1.0; charset=utf-8\r\n\r\nTest Message"
 	testFTMessageHeaders = map[string]string{"test": "test2"}
 	testFTMessageBody    = "Test Message"
+	testComplexFTMessageHeaders = map[string]string{"Content-Type": "application/vnd.ft-upp-article+json; version=1.0; charset=utf-8"}
 )
 
 func Test_FTMessage_Build(t *testing.T) {
@@ -40,5 +42,12 @@ func TestFTMessage_Parse_CRLF(t *testing.T) {
 	ftmsg := rawToFTMessage(payload)
 
 	assert.EqualValues(t, ftmsg.Headers, testFTMessageHeaders)
+	assert.EqualValues(t, ftmsg.Body, testFTMessageBody)
+}
+func TestFTMessageWithComplexHeaders_Parse_CRLF(t *testing.T) {
+	payload := []byte(testComplexFTMessage)
+	ftmsg := rawToFTMessage(payload)
+
+	assert.EqualValues(t, ftmsg.Headers, testComplexFTMessageHeaders)
 	assert.EqualValues(t, ftmsg.Body, testFTMessageBody)
 }
