@@ -8,7 +8,7 @@ import (
 
 var (
 	testFTMessage        = "FTMSG/1.0\r\ntest: test2\n\nTest Message"
-	testComplexFTMessage        = "FTMSG/1.0\nContent-Type: application/vnd.ft-upp-article+json; version=1.0; charset=utf-8\r\n\r\nTest Message"
+	testComplexFTMessage        = "FTMSG/1.0\r\nContent-Type: application/vnd.ft-upp-article+json; version=1.0; charset=utf-8\r\n\r\nTest Message"
 	testFTMessageHeaders = map[string]string{"test": "test2"}
 	testFTMessageBody    = "Test Message"
 	testComplexFTMessageHeaders = map[string]string{"Content-Type": "application/vnd.ft-upp-article+json; version=1.0; charset=utf-8"}
