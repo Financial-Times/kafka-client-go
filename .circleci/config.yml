@@ -10,7 +10,8 @@ jobs:
           CIRCLE_COVERAGE_REPORT: /tmp/coverage-results
       - image: blacktop/kafka:0.8
         environment:
-          KAFKA_BROKER_ID: 1
+          - KAFKA_BROKER_ID: 1
+          - KAFKA_CREATE_TOPICS: "testTopic:1:1"
     steps:
       - checkout
       - run:
