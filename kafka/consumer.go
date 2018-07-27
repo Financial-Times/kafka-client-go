@@ -37,6 +37,27 @@ type MessageConsumer struct {
 	errCh          chan error
 }
 
+type recoverableConsumerError struct {
+	error error
+}
+
+func (rce recoverableConsumerError) Error() string {
+
+	if rce.error == nil {
+		return ""
+	}
+
+	return rce.error.Error()
+}
+
+// NewRecoverableConsumerError wraps the provided error (nil values accepted) and returns it.
+// Wrapped error is meant for clients to return from their message handler implementations if they don't want to commit the
+// current offset. Any other error, regardless of their type/value, returned from handler implementation will be logged
+// but will not interfere with the offset committing.
+func NewRecoverableConsumerError(err error) error {
+	return recoverableConsumerError{err}
+}
+
 type perseverantConsumer struct {
 	sync.RWMutex
 	zookeeperConnectionString string
@@ -104,16 +125,30 @@ func (c *MessageConsumer) StartListening(messageHandler func(message FTMessage) 
 	go func() {
 		for message := range c.consumer.Messages() {
 			ftMsg := rawToFTMessage(message.Value)
-			err := messageHandler(ftMsg)
-			if err != nil {
-				log.WithError(err).WithField("method", "StartListening").WithField("messageKey", message.Key).Error("Error processing message")
-				if c.errCh != nil {
-					c.errCh <- err
-				}
-			}
+			c.dispatchMessage(message.Key, ftMsg, messageHandler)
 			c.consumer.CommitUpto(message)
 		}
 	}()
+}
+
+func (c *MessageConsumer) dispatchMessage(key []byte, message FTMessage, messageHandler func(message FTMessage) error) {
+
+	err := messageHandler(message)
+
+	if err != nil {
+		log.WithError(err).WithField("method", "StartListening").WithField("messageKey", key).Error("Error processing message")
+
+		if c.errCh != nil {
+			c.errCh <- err
+		}
+
+		if _, isRecoverable := err.(recoverableConsumerError); isRecoverable {
+			// there is no control over the number of attempts at this point,
+			// it is up to the user/app of the library to decide whether it's time to
+			// give up or not.
+			c.dispatchMessage(key, message, messageHandler)
+		}
+	}
 }
 
 func (c *MessageConsumer) Shutdown() {

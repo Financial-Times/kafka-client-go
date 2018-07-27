@@ -9,9 +9,9 @@ import (
 
 	"github.com/Shopify/sarama"
 	"github.com/pkg/errors"
-	"github.com/stretchr/testify/assert"
+			"github.com/stretchr/testify/assert"
 	"github.com/wvanbergen/kafka/consumergroup"
-)
+		)
 
 const (
 	zookeeperConnectionString = "127.0.0.1:2181"
@@ -20,6 +20,8 @@ const (
 
 var expectedErrors = []error{errors.New("Booster Separation Failure"), errors.New("Payload missing")}
 var messages = []*sarama.ConsumerMessage{{Value: []byte("Message1")}, {Value: []byte("Message2")}}
+
+var expectedRecoverableError = NewRecoverableConsumerError(errors.New("some error happened worth re-consuming the same message"))
 
 func TestNewConsumer(t *testing.T) {
 	if testing.Short() {
@@ -254,6 +256,47 @@ func TestMessageConsumer_StartListeningHandlerErrors(t *testing.T) {
 	<-stoppedChan
 	assert.Equal(t, int32(len(messages)), atomic.LoadInt32(&count))
 	assert.Equal(t, expectedErrors, actualErrors, "Didn't get the expected errors from the consumer handler.")
+}
+
+func TestMessageConsumer_StartListeningHandleRecoverableErrors(t *testing.T) {
+	var count int32
+	consumer, errChan := NewTestConsumerWithErrChan()
+	defer close(errChan)
+
+	var actualErrors []error
+	stopChan := make(chan struct{})
+	stoppedChan := make(chan struct{})
+	go func() {
+		defer close(stoppedChan)
+		for {
+			select {
+			case actualError := <-errChan:
+				actualErrors = append(actualErrors, actualError)
+			case <-stopChan:
+				return
+			}
+		}
+	}()
+
+	consumer.StartListening(func(msg FTMessage) error {
+		atomic.AddInt32(&count, 1)
+
+		if atomic.LoadInt32(&count) == 1 {
+			// causing a retry
+			return expectedRecoverableError
+		}
+
+		return nil
+	})
+
+	time.Sleep(1 * time.Second)
+
+	close(stopChan)
+	<-stoppedChan
+
+	// number of processed messages should be greater than the produced messages
+	assert.Equal(t, int32(len(messages)) + 1, atomic.LoadInt32(&count))
+	assert.Equal(t, expectedRecoverableError, actualErrors[0], "Didn't get the expected errors from the consumer handler.")
 }
 
 func TestMessageConsumer_StartListening(t *testing.T) {

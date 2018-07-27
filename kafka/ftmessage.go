@@ -36,7 +36,7 @@ func (m *FTMessage) Build() string {
 	return buffer.String()
 }
 
-func rawToFTMessage(msg []byte) (FTMessage) {
+func rawToFTMessage(msg []byte) FTMessage {
 	ftMsg := FTMessage{}
 	raw := string(msg)
 
@@ -65,7 +65,7 @@ func getHeaderSectionEndingIndex(msg string) int {
 	return len(msg)
 }
 
-func parseHeaders(msg string) (map[string]string) {
+func parseHeaders(msg string) map[string]string {
 	headerLines := re.FindAllString(msg, -1)
 
 	headers := make(map[string]string)
