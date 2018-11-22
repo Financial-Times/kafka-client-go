@@ -290,3 +290,18 @@ func TestPerseverantConsumerListensToConsumer(t *testing.T) {
 
 	consumer.Shutdown()
 }
+
+func TestPerserverantConsumer__Consume(t *testing.T) {
+	var count int32
+	consumer := perseverantConsumer{consumer: NewTestConsumer()}
+
+	consumer.Consume(func(msg FTMessage) error {
+		atomic.AddInt32(&count, 1)
+		return nil
+	})
+
+	time.Sleep(1 * time.Second)
+	assert.Equal(t, int32(len(messages)), atomic.LoadInt32(&count))
+
+	consumer.Shutdown()
+}
