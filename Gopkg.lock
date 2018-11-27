@@ -2,6 +2,12 @@
 
 
 [[projects]]
+  name = "github.com/Financial-Times/kafka"
+  packages = ["consumergroup"]
+  revision = "50ba9d7955b4df3bf3235b3d8cfed0ce9afdfab0"
+  version = "1.0.1-contexts-rc1"
+
+[[projects]]
   name = "github.com/Shopify/sarama"
   packages = [
     ".",
@@ -93,11 +99,6 @@
   version = "v1.1.4"
 
 [[projects]]
-  name = "github.com/wvanbergen/kafka"
-  packages = ["consumergroup"]
-  revision = "bc265fedb9ff5b5c5d3c0fdcef4a819b3523d3ee"
-
-[[projects]]
   name = "github.com/wvanbergen/kazoo-go"
   packages = ["."]
   revision = "494a179ad10a1a52daa7536a82cc215bc728c399"
@@ -118,6 +119,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "63033913dec2edad9de31be18593f15d54c587a3bf32831def52d7edbbf32734"
+  inputs-digest = "715efd9ef4e5b5573f5742601448c5860fbdbc1ef52e654ccd8ac678b27e1943"
   solver-name = "gps-cdcl"
   solver-version = 1

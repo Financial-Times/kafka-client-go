@@ -5,10 +5,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Financial-Times/kafka/consumergroup"
 	"github.com/Shopify/sarama"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/wvanbergen/kafka/consumergroup"
 	"github.com/wvanbergen/kazoo-go"
 )
 

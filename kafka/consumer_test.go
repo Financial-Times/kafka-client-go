@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Financial-Times/kafka/consumergroup"
 	"github.com/Shopify/sarama"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
-	"github.com/wvanbergen/kafka/consumergroup"
 )
 
 const (
