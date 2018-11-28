@@ -43,7 +43,7 @@
 
 [[constraint]]
   name = "github.com/Financial-Times/kafka"
-  version = "1.0.1-contexts-rc1"
+  version = "1.0.1-contexts-rc2"
 
 [prune]
   go-tests = true

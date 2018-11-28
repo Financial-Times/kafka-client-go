@@ -4,8 +4,8 @@
 [[projects]]
   name = "github.com/Financial-Times/kafka"
   packages = ["consumergroup"]
-  revision = "50ba9d7955b4df3bf3235b3d8cfed0ce9afdfab0"
-  version = "1.0.1-contexts-rc1"
+  revision = "928fd8736b844d2915f9b62b784ebcc824564146"
+  version = "1.0.1-contexts-rc2"
 
 [[projects]]
   name = "github.com/Shopify/sarama"
@@ -116,9 +116,15 @@
   ]
   revision = "9aade4d3a3b7e6d876cd3823ad20ec45fc035402"
 
+[[projects]]
+  branch = "master"
+  name = "golang.org/x/time"
+  packages = ["rate"]
+  revision = "85acf8d2951cb2a3bde7632f9ff273ef0379bcbd"
+
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "715efd9ef4e5b5573f5742601448c5860fbdbc1ef52e654ccd8ac678b27e1943"
+  inputs-digest = "b5dff28845ce0ef43be0d8796e8d729389dcd1173ea637da330c87758f76b9a7"
   solver-name = "gps-cdcl"
   solver-version = 1
