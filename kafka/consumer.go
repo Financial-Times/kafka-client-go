@@ -24,7 +24,6 @@ type ConsumerGrouper interface {
 
 type Consumer interface {
 	StartListening(messageHandler func(message FTMessage) error)
-	Consume(messageHandler func(message FTMessage) error)
 	Shutdown()
 	ConnectivityCheck() error
 }
@@ -119,30 +118,6 @@ func (c *MessageConsumer) StartListening(messageHandler func(message FTMessage) 
 	}()
 }
 
-// Consume will consume messages from Kafka, process them, and then call the provided handler. Unlike StartListening(), this function will block.
-func (c *MessageConsumer) Consume(messageHandler func(message FTMessage) error) {
-	go func() {
-		for err := range c.consumer.Errors() {
-			log.WithError(err).WithField("method", "StartListening").Error("Error proccessing message")
-			if c.errCh != nil {
-				c.errCh <- err
-			}
-		}
-	}()
-
-	for message := range c.consumer.Messages() {
-		ftMsg := rawToFTMessage(message.Value)
-		err := messageHandler(ftMsg)
-		if err != nil {
-			log.WithError(err).WithField("method", "StartListening").WithField("messageKey", message.Key).Error("Error processing message")
-			if c.errCh != nil {
-				c.errCh <- err
-			}
-		}
-		c.consumer.CommitUpto(message)
-	}
-}
-
 func (c *MessageConsumer) Shutdown() {
 	if err := c.consumer.Close(); err != nil {
 		log.WithError(err).WithField("method", "Shutdown").Error("Error closing the consumer")
@@ -220,17 +195,6 @@ func (c *perseverantConsumer) StartListening(messageHandler func(message FTMessa
 	defer c.RUnlock()
 
 	c.consumer.StartListening(messageHandler)
-}
-
-func (c *perseverantConsumer) Consume(messageHandler func(message FTMessage) error) {
-	if !c.isConnected() {
-		c.connect()
-	}
-
-	c.RLock()
-	defer c.RUnlock()
-
-	c.consumer.Consume(messageHandler)
 }
 
 func (c *perseverantConsumer) Shutdown() {
