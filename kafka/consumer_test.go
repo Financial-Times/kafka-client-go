@@ -69,7 +69,7 @@ func TestNewPerseverantConsumer(t *testing.T) {
 		t.Skip("Skipping test as it requires a connection to Zookeeper.")
 	}
 
-	consumer, err := NewPerseverantConsumer(zookeeperConnectionString, testConsumerGroup, []string{testTopic}, nil, time.Second)
+	consumer, err := NewPerseverantConsumer(zookeeperConnectionString, testConsumerGroup, []string{testTopic}, nil, time.Second, nil)
 	assert.NoError(t, err)
 
 	err = consumer.ConnectivityCheck()
