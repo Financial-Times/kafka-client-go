@@ -4,8 +4,8 @@
 [[projects]]
   name = "github.com/Financial-Times/kafka"
   packages = ["consumergroup"]
-  revision = "928fd8736b844d2915f9b62b784ebcc824564146"
-  version = "1.0.1-contexts-rc2"
+  revision = "fddecb2b8f89d4088fd2b1296194933cfed68d73"
+  version = "1.0.1"
 
 [[projects]]
   name = "github.com/Shopify/sarama"
@@ -125,6 +125,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "b5dff28845ce0ef43be0d8796e8d729389dcd1173ea637da330c87758f76b9a7"
+  inputs-digest = "7d0412083c77bdbdcf6306b30f10451e6b97d5b38d68563a83644eef0329917b"
   solver-name = "gps-cdcl"
   solver-version = 1
