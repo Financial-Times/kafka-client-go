@@ -2,6 +2,12 @@
 
 
 [[projects]]
+  name = "github.com/Financial-Times/kafka"
+  packages = ["consumergroup"]
+  revision = "fddecb2b8f89d4088fd2b1296194933cfed68d73"
+  version = "1.0.1"
+
+[[projects]]
   name = "github.com/Shopify/sarama"
   packages = [
     ".",
@@ -93,11 +99,6 @@
   version = "v1.1.4"
 
 [[projects]]
-  name = "github.com/wvanbergen/kafka"
-  packages = ["consumergroup"]
-  revision = "bc265fedb9ff5b5c5d3c0fdcef4a819b3523d3ee"
-
-[[projects]]
   name = "github.com/wvanbergen/kazoo-go"
   packages = ["."]
   revision = "494a179ad10a1a52daa7536a82cc215bc728c399"
@@ -115,9 +116,15 @@
   ]
   revision = "9aade4d3a3b7e6d876cd3823ad20ec45fc035402"
 
+[[projects]]
+  branch = "master"
+  name = "golang.org/x/time"
+  packages = ["rate"]
+  revision = "85acf8d2951cb2a3bde7632f9ff273ef0379bcbd"
+
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "63033913dec2edad9de31be18593f15d54c587a3bf32831def52d7edbbf32734"
+  inputs-digest = "7d0412083c77bdbdcf6306b30f10451e6b97d5b38d68563a83644eef0329917b"
   solver-name = "gps-cdcl"
   solver-version = 1

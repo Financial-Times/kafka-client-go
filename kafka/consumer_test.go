@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Financial-Times/kafka/consumergroup"
 	"github.com/Shopify/sarama"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
-	"github.com/wvanbergen/kafka/consumergroup"
 )
 
 const (
@@ -69,7 +69,7 @@ func TestNewPerseverantConsumer(t *testing.T) {
 		t.Skip("Skipping test as it requires a connection to Zookeeper.")
 	}
 
-	consumer, err := NewPerseverantConsumer(zookeeperConnectionString, testConsumerGroup, []string{testTopic}, nil, time.Second)
+	consumer, err := NewPerseverantConsumer(zookeeperConnectionString, testConsumerGroup, []string{testTopic}, nil, time.Second, nil)
 	assert.NoError(t, err)
 
 	err = consumer.ConnectivityCheck()

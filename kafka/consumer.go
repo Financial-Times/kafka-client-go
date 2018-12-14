@@ -5,10 +5,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Financial-Times/kafka/consumergroup"
 	"github.com/Shopify/sarama"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/wvanbergen/kafka/consumergroup"
 	"github.com/wvanbergen/kazoo-go"
 )
 
@@ -45,6 +45,7 @@ type perseverantConsumer struct {
 	config                    *consumergroup.Config
 	consumer                  Consumer
 	retryInterval             time.Duration
+	errCh                     *chan error
 }
 
 type Config struct {
@@ -86,8 +87,8 @@ func NewConsumer(config Config) (Consumer, error) {
 	}, nil
 }
 
-func NewPerseverantConsumer(zookeeperConnectionString string, consumerGroup string, topics []string, config *consumergroup.Config, retryInterval time.Duration) (Consumer, error) {
-	consumer := &perseverantConsumer{sync.RWMutex{}, zookeeperConnectionString, consumerGroup, topics, config, nil, retryInterval}
+func NewPerseverantConsumer(zookeeperConnectionString string, consumerGroup string, topics []string, config *consumergroup.Config, retryInterval time.Duration, errCh *chan error) (Consumer, error) {
+	consumer := &perseverantConsumer{sync.RWMutex{}, zookeeperConnectionString, consumerGroup, topics, config, nil, retryInterval, errCh}
 	return consumer, nil
 }
 
@@ -95,6 +96,7 @@ func (c *MessageConsumer) StartListening(messageHandler func(message FTMessage) 
 	go func() {
 		for err := range c.consumer.Errors() {
 			log.WithError(err).WithField("method", "StartListening").Error("Error proccessing message")
+
 			if c.errCh != nil {
 				c.errCh <- err
 			}
@@ -146,12 +148,19 @@ func (c *MessageConsumer) ConnectivityCheck() error {
 func (c *perseverantConsumer) connect() {
 	connectorLog := log.WithField("zookeeper", c.zookeeperConnectionString).WithField("topics", c.topics).WithField("consumerGroup", c.consumerGroup)
 	for {
+		var errCh chan error
+		if c.errCh != nil {
+			errCh = *c.errCh
+		}
+
 		consumer, err := NewConsumer(Config{
 			ZookeeperConnectionString: c.zookeeperConnectionString,
 			ConsumerGroup:             c.consumerGroup,
 			Topics:                    c.topics,
 			ConsumerGroupConfig:       c.config,
+			Err:                       errCh,
 		})
+
 		if err == nil {
 			connectorLog.Info("connected to Kafka consumer")
 			c.setConsumer(consumer)
