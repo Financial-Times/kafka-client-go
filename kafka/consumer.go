@@ -60,7 +60,6 @@ type Config struct {
 }
 
 func NewConsumer(config Config) (Consumer, error) {
-
 	config.Logger.Debug("Creating new consumer")
 
 	zookeeperNodes, chroot := kazoo.ParseConnectionString(config.ZookeeperConnectionString)
@@ -69,8 +68,7 @@ func NewConsumer(config Config) (Consumer, error) {
 		config.ConsumerGroupConfig = DefaultConsumerConfig()
 		config.ConsumerGroupConfig.Zookeeper.Chroot = chroot
 	} else if config.ConsumerGroupConfig.Zookeeper.Chroot != chroot {
-
-		errorMessage := "Mismatch in Zookeeper config while creating Kafka consumer"
+		errorMessage := "mismatch in Zookeeper config while creating Kafka consumer"
 		config.Logger.
 			WithField("method", "NewConsumer").
 			WithField("configuredChroot", config.ConsumerGroupConfig.Zookeeper.Chroot).
@@ -113,15 +111,12 @@ func NewPerseverantConsumer(zookeeperConnectionString string, consumerGroup stri
 }
 
 func (c *MessageConsumer) StartListening(messageHandler func(message FTMessage) error) {
-
 	go func() {
-
 		c.logger.Debug("Start listening for consumer errors")
 		for err := range c.consumer.Errors() {
-
 			c.logger.WithError(err).
 				WithField("method", "StartListening").
-				Error("Error proccessing message")
+				Error("error processing message")
 
 			if c.errCh != nil {
 				c.errCh <- err
@@ -136,7 +131,6 @@ func (c *MessageConsumer) StartListening(messageHandler func(message FTMessage) 
 			ftMsg := rawToFTMessage(message.Value)
 			err := messageHandler(ftMsg)
 			if err != nil {
-
 				c.logger.WithError(err).
 					WithField("method", "StartListening").
 					WithField("messageKey", message.Key).
@@ -153,7 +147,6 @@ func (c *MessageConsumer) StartListening(messageHandler func(message FTMessage) 
 
 func (c *MessageConsumer) Shutdown() {
 	if err := c.consumer.Close(); err != nil {
-
 		c.logger.WithError(err).
 			WithField("method", "Shutdown").
 			Error("Error closing consumer")
@@ -184,7 +177,6 @@ func (c *MessageConsumer) ConnectivityCheck() error {
 }
 
 func (c *perseverantConsumer) connect() {
-
 	connectorLog := c.logger.WithField("zookeeper", c.zookeeperConnectionString).
 		WithField("topics", c.topics).
 		WithField("consumerGroup", c.consumerGroup)

@@ -66,11 +66,11 @@ func TestNewProducer(t *testing.T) {
 
 func TestNewProducerBadUrl(t *testing.T) {
 	server := httptest.NewServer(nil)
-	kUrl := server.URL[strings.LastIndex(server.URL, "/")+1:]
+	kURL := server.URL[strings.LastIndex(server.URL, "/")+1:]
 	server.Close()
 
 	log := logger.NewUPPLogger("test", "INFO")
-	_, err := NewProducer(kUrl, testTopic, DefaultProducerConfig(), log)
+	_, err := NewProducer(kURL, testTopic, DefaultProducerConfig(), log)
 
 	assert.Error(t, err)
 }
@@ -97,11 +97,11 @@ func TestNewPerseverantProducer(t *testing.T) {
 
 func TestNewPerseverantProducerNotConnected(t *testing.T) {
 	server := httptest.NewServer(nil)
-	kUrl := server.URL[strings.LastIndex(server.URL, "/")+1:]
+	kURL := server.URL[strings.LastIndex(server.URL, "/")+1:]
 	server.Close()
 
 	log := logger.NewUPPLogger("test", "INFO")
-	producer, err := NewPerseverantProducer(kUrl, testTopic, nil, 0, time.Second, log)
+	producer, err := NewPerseverantProducer(kURL, testTopic, nil, 0, time.Second, log)
 	assert.NoError(t, err)
 
 	err = producer.ConnectivityCheck()

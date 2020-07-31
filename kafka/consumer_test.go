@@ -19,7 +19,7 @@ const (
 	testConsumerGroup         = "testgroup"
 )
 
-var expectedErrors = []error{errors.New("Booster Separation Failure"), errors.New("Payload missing")}
+var expectedErrors = []error{errors.New("booster Separation Failure"), errors.New("payload missing")}
 var messages = []*sarama.ConsumerMessage{{Value: []byte("Message1")}, {Value: []byte("Message2")}}
 
 func TestNewConsumer(t *testing.T) {
@@ -58,11 +58,11 @@ func TestNewConsumer(t *testing.T) {
 
 func TestConsumerNotConnectedConnectivityCheckError(t *testing.T) {
 	server := httptest.NewServer(nil)
-	zkUrl := server.URL[strings.LastIndex(server.URL, "/")+1:]
+	zkURL := server.URL[strings.LastIndex(server.URL, "/")+1:]
 	server.Close()
 
 	log := logger.NewUPPLogger("test", "INFO")
-	consumer := MessageConsumer{zookeeperNodes: []string{zkUrl}, consumerGroup: testConsumerGroup, topics: []string{testTopic}, config: nil, logger: log}
+	consumer := MessageConsumer{zookeeperNodes: []string{zkURL}, consumerGroup: testConsumerGroup, topics: []string{testTopic}, config: nil, logger: log}
 
 	err := consumer.ConnectivityCheck()
 	assert.Error(t, err)
@@ -95,7 +95,6 @@ func TestNewPerseverantConsumer(t *testing.T) {
 type MockConsumerGroup struct {
 	messages        []*sarama.ConsumerMessage
 	errors          []error
-	committedCount  int
 	IsShutdown      bool
 	errorOnShutdown bool
 }

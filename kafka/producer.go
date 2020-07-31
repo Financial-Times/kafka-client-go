@@ -36,7 +36,6 @@ type perseverantProducer struct {
 }
 
 func NewProducer(brokers string, topic string, config *sarama.Config, logger *logger.UPPLogger) (Producer, error) {
-
 	if config == nil {
 		config = DefaultProducerConfig()
 	}
