@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	logger "github.com/Financial-Times/go-logger/v2"
 	"github.com/Shopify/sarama/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -52,7 +53,8 @@ func TestNewProducer(t *testing.T) {
 		t.Skip("Skipping test as it requires a connection to Kafka.")
 	}
 
-	producer, err := NewProducer(testBrokers, testTopic, DefaultProducerConfig())
+	log := logger.NewUPPLogger("test", "INFO")
+	producer, err := NewProducer(testBrokers, testTopic, DefaultProducerConfig(), log)
 
 	assert.NoError(t, err)
 
@@ -67,7 +69,8 @@ func TestNewProducerBadUrl(t *testing.T) {
 	kUrl := server.URL[strings.LastIndex(server.URL, "/")+1:]
 	server.Close()
 
-	_, err := NewProducer(kUrl, testTopic, DefaultProducerConfig())
+	log := logger.NewUPPLogger("test", "INFO")
+	_, err := NewProducer(kUrl, testTopic, DefaultProducerConfig(), log)
 
 	assert.Error(t, err)
 }
@@ -82,7 +85,8 @@ func TestNewPerseverantProducer(t *testing.T) {
 		t.Skip("Skipping test as it requires a connection to Kafka.")
 	}
 
-	producer, err := NewPerseverantProducer(testBrokers, testTopic, nil, 0, time.Second)
+	log := logger.NewUPPLogger("test", "INFO")
+	producer, err := NewPerseverantProducer(testBrokers, testTopic, nil, 0, time.Second, log)
 	assert.NoError(t, err)
 
 	time.Sleep(time.Second)
@@ -96,7 +100,8 @@ func TestNewPerseverantProducerNotConnected(t *testing.T) {
 	kUrl := server.URL[strings.LastIndex(server.URL, "/")+1:]
 	server.Close()
 
-	producer, err := NewPerseverantProducer(kUrl, testTopic, nil, 0, time.Second)
+	log := logger.NewUPPLogger("test", "INFO")
+	producer, err := NewPerseverantProducer(kUrl, testTopic, nil, 0, time.Second, log)
 	assert.NoError(t, err)
 
 	err = producer.ConnectivityCheck()
@@ -108,7 +113,8 @@ func TestNewPerseverantProducerWithInitialDelay(t *testing.T) {
 		t.Skip("Skipping test as it requires a connection to Kafka.")
 	}
 
-	producer, err := NewPerseverantProducer(testBrokers, testTopic, nil, time.Second, time.Second)
+	log := logger.NewUPPLogger("test", "INFO")
+	producer, err := NewPerseverantProducer(testBrokers, testTopic, nil, time.Second, time.Second, log)
 	assert.NoError(t, err)
 
 	err = producer.ConnectivityCheck()

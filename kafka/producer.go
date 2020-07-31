@@ -5,9 +5,9 @@ import (
 	"sync"
 	"time"
 
+	logger "github.com/Financial-Times/go-logger/v2"
 	"github.com/Shopify/sarama"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 )
 
 const errProducerNotConnected = "producer is not connected to Kafka"
@@ -23,6 +23,7 @@ type MessageProducer struct {
 	topic    string
 	config   *sarama.Config
 	producer sarama.SyncProducer
+	logger   *logger.UPPLogger
 }
 
 type perseverantProducer struct {
@@ -31,9 +32,10 @@ type perseverantProducer struct {
 	topic    string
 	config   *sarama.Config
 	producer Producer
+	logger   *logger.UPPLogger
 }
 
-func NewProducer(brokers string, topic string, config *sarama.Config) (Producer, error) {
+func NewProducer(brokers string, topic string, config *sarama.Config, logger *logger.UPPLogger) (Producer, error) {
 
 	if config == nil {
 		config = DefaultProducerConfig()
@@ -43,7 +45,9 @@ func NewProducer(brokers string, topic string, config *sarama.Config) (Producer,
 
 	sp, err := sarama.NewSyncProducer(brokerSlice, config)
 	if err != nil {
-		log.WithError(err).WithField("method", "NewProducer").Error("Error creating the producer")
+		logger.WithError(err).
+			WithField("method", "NewProducer").
+			Error("Error creating the producer")
 		return nil, err
 	}
 
@@ -52,11 +56,12 @@ func NewProducer(brokers string, topic string, config *sarama.Config) (Producer,
 		topic:    topic,
 		config:   config,
 		producer: sp,
+		logger:   logger,
 	}, nil
 }
 
-func NewPerseverantProducer(brokers string, topic string, config *sarama.Config, initialDelay time.Duration, retryInterval time.Duration) (Producer, error) {
-	producer := &perseverantProducer{sync.RWMutex{}, brokers, topic, config, nil}
+func NewPerseverantProducer(brokers string, topic string, config *sarama.Config, initialDelay time.Duration, retryInterval time.Duration, logger *logger.UPPLogger) (Producer, error) {
+	producer := &perseverantProducer{sync.RWMutex{}, brokers, topic, config, nil, logger}
 
 	go func() {
 		if initialDelay > 0 {
@@ -74,20 +79,24 @@ func (p *MessageProducer) SendMessage(message FTMessage) error {
 		Value: sarama.StringEncoder(message.Build()),
 	})
 	if err != nil {
-		log.WithError(err).WithField("method", "SendMessage").Error("Error sending a Kafka message")
+		p.logger.WithError(err).
+			WithField("method", "SendMessage").
+			Error("Error sending a Kafka message")
 	}
 	return err
 }
 
 func (p *MessageProducer) Shutdown() {
 	if err := p.producer.Close(); err != nil {
-		log.WithError(err).WithField("method", "Shutdown").Error("Error closing the producer")
+		p.logger.WithError(err).
+			WithField("method", "Shutdown").
+			Error("Error closing the producer")
 	}
 }
 
 func (p *MessageProducer) ConnectivityCheck() error {
 	// like the consumer check, establishing a new connection gives us some degree of confidence
-	tmp, err := NewProducer(strings.Join(p.brokers, ","), p.topic, p.config)
+	tmp, err := NewProducer(strings.Join(p.brokers, ","), p.topic, p.config, p.logger)
 	if tmp != nil {
 		defer tmp.Shutdown()
 	}
@@ -96,16 +105,18 @@ func (p *MessageProducer) ConnectivityCheck() error {
 }
 
 func (p *perseverantProducer) connect(retryInterval time.Duration) {
-	connectorLog := log.WithField("brokers", p.brokers).WithField("topic", p.topic)
+	connectorLog := p.logger.WithField("brokers", p.brokers).
+		WithField("topic", p.topic)
 	for {
-		producer, err := NewProducer(p.brokers, p.topic, p.config)
+		producer, err := NewProducer(p.brokers, p.topic, p.config, p.logger)
 		if err == nil {
 			connectorLog.Info("connected to Kafka producer")
 			p.setProducer(producer)
 			break
 		}
 
-		connectorLog.WithError(err).Warn(errProducerNotConnected)
+		connectorLog.WithError(err).
+			Warn(errProducerNotConnected)
 		time.Sleep(retryInterval)
 	}
 }

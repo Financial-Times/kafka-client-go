@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	logger "github.com/Financial-Times/go-logger/v2"
 	"github.com/Financial-Times/kafka/consumergroup"
 	"github.com/Shopify/sarama"
 	"github.com/pkg/errors"
@@ -32,12 +33,14 @@ func TestNewConsumer(t *testing.T) {
 	errCh := make(chan error, 1)
 	defer close(errCh)
 
+	log := logger.NewUPPLogger("test", "INFO")
 	consumer, err := NewConsumer(Config{
 		ZookeeperConnectionString: zookeeperConnectionString,
 		ConsumerGroup:             testConsumerGroup,
 		Topics:                    []string{testTopic},
 		ConsumerGroupConfig:       config,
 		Err:                       errCh,
+		Logger:                    log,
 	})
 	assert.NoError(t, err)
 
@@ -58,7 +61,8 @@ func TestConsumerNotConnectedConnectivityCheckError(t *testing.T) {
 	zkUrl := server.URL[strings.LastIndex(server.URL, "/")+1:]
 	server.Close()
 
-	consumer := MessageConsumer{zookeeperNodes: []string{zkUrl}, consumerGroup: testConsumerGroup, topics: []string{testTopic}, config: nil}
+	log := logger.NewUPPLogger("test", "INFO")
+	consumer := MessageConsumer{zookeeperNodes: []string{zkUrl}, consumerGroup: testConsumerGroup, topics: []string{testTopic}, config: nil, logger: log}
 
 	err := consumer.ConnectivityCheck()
 	assert.Error(t, err)
@@ -69,7 +73,8 @@ func TestNewPerseverantConsumer(t *testing.T) {
 		t.Skip("Skipping test as it requires a connection to Zookeeper.")
 	}
 
-	consumer, err := NewPerseverantConsumer(zookeeperConnectionString, testConsumerGroup, []string{testTopic}, nil, time.Second, nil)
+	log := logger.NewUPPLogger("test", "INFO")
+	consumer, err := NewPerseverantConsumer(zookeeperConnectionString, testConsumerGroup, []string{testTopic}, nil, time.Second, nil, log)
 	assert.NoError(t, err)
 
 	err = consumer.ConnectivityCheck()
@@ -135,6 +140,8 @@ func (cg *MockConsumerGroup) Closed() bool {
 
 func NewTestConsumerWithErrChan() (Consumer, chan error) {
 	errCh := make(chan error, len(expectedErrors))
+
+	log := logger.NewUPPLogger("test", "INFO")
 	return &MessageConsumer{
 		topics:         []string{"topic"},
 		consumerGroup:  "group",
@@ -145,12 +152,14 @@ func NewTestConsumerWithErrChan() (Consumer, chan error) {
 			IsShutdown:      false,
 			errorOnShutdown: true,
 		},
-		errCh: errCh,
+		errCh:  errCh,
+		logger: log,
 	}, errCh
 }
 
 func NewTestConsumerWithErrors() (Consumer, chan error) {
 	errCh := make(chan error, len(expectedErrors))
+	log := logger.NewUPPLogger("test", "INFO")
 	return &MessageConsumer{
 		topics:         []string{"topic"},
 		consumerGroup:  "group",
@@ -160,11 +169,13 @@ func NewTestConsumerWithErrors() (Consumer, chan error) {
 			errors:     expectedErrors,
 			IsShutdown: false,
 		},
-		errCh: errCh,
+		errCh:  errCh,
+		logger: log,
 	}, errCh
 }
 
 func NewTestConsumer() Consumer {
+	log := logger.NewUPPLogger("test", "INFO")
 	return &MessageConsumer{
 		topics:         []string{"topic"},
 		consumerGroup:  "group",
@@ -174,6 +185,7 @@ func NewTestConsumer() Consumer {
 			errors:     []error{},
 			IsShutdown: false,
 		},
+		logger: log,
 	}
 }
 
