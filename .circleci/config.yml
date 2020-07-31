@@ -1,9 +1,10 @@
-version: 2
+version: 2.1
+orbs:
+  snyk: snyk/snyk@0.0.10
 jobs:
   build:
-    working_directory: /go/src/github.com/Financial-Times/kafka-client-go
     docker:
-      - image: golang:1.8.3
+      - image: golang:1
         environment:
           GOPATH: /go
           CIRCLE_TEST_REPORTS: /tmp/test-results
@@ -26,8 +27,8 @@ jobs:
             mkdir -p ${CIRCLE_TEST_REPORTS}
             mkdir -p ${CIRCLE_COVERAGE_REPORT}
       - run:
-          name: Go Dep
-          command: dep ensure -vendor-only
+          name: Get dependencies
+          command: go mod download
       - run:
           name: Run Tests
           command: |
@@ -38,3 +39,9 @@ jobs:
           command: /go/bin/goveralls -coverprofile=${CIRCLE_COVERAGE_REPORT}/coverage.out -service=circle-ci -repotoken=$COVERALLS_TOKEN
       - store_test_results:
           path: /tmp/test-results
+      - run:
+          name: Install sudo
+          command: |
+            apt-get update
+            apt-get install -y sudo
+      - snyk/scan
