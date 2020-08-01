@@ -1,14 +1,14 @@
 package kafka
 
 import (
+	"fmt"
 	"strings"
 	"sync"
 	"time"
 
+	logger "github.com/Financial-Times/go-logger/v2"
 	"github.com/Financial-Times/kafka/consumergroup"
 	"github.com/Shopify/sarama"
-	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 	"github.com/wvanbergen/kazoo-go"
 )
 
@@ -35,6 +35,7 @@ type MessageConsumer struct {
 	consumer       ConsumerGrouper
 	config         *consumergroup.Config
 	errCh          chan error
+	logger         *logger.UPPLogger
 }
 
 type perseverantConsumer struct {
@@ -46,6 +47,7 @@ type perseverantConsumer struct {
 	consumer                  Consumer
 	retryInterval             time.Duration
 	errCh                     *chan error
+	logger                    *logger.UPPLogger
 }
 
 type Config struct {
@@ -54,26 +56,32 @@ type Config struct {
 	Topics                    []string
 	ConsumerGroupConfig       *consumergroup.Config
 	Err                       chan error
+	Logger                    *logger.UPPLogger
 }
 
 func NewConsumer(config Config) (Consumer, error) {
+	config.Logger.Debug("Creating new consumer")
+
 	zookeeperNodes, chroot := kazoo.ParseConnectionString(config.ZookeeperConnectionString)
 
 	if config.ConsumerGroupConfig == nil {
 		config.ConsumerGroupConfig = DefaultConsumerConfig()
 		config.ConsumerGroupConfig.Zookeeper.Chroot = chroot
 	} else if config.ConsumerGroupConfig.Zookeeper.Chroot != chroot {
-		log.WithFields(log.Fields{
-			"method":           "NewConsumer",
-			"configuredChroot": config.ConsumerGroupConfig.Zookeeper.Chroot,
-			"parsedChroot":     chroot,
-		}).Error("Mismatch in Zookeeper config while creating Kafka consumer")
-		return nil, errors.New("Mismatch in Zookeeper config while creating Kafka consumer")
+		errorMessage := "mismatch in Zookeeper config while creating Kafka consumer"
+		config.Logger.
+			WithField("method", "NewConsumer").
+			WithField("configuredChroot", config.ConsumerGroupConfig.Zookeeper.Chroot).
+			WithField("parsedChroot", chroot).
+			Error(errorMessage)
+		return nil, fmt.Errorf(errorMessage)
 	}
 
 	consumer, err := consumergroup.JoinConsumerGroup(config.ConsumerGroup, config.Topics, zookeeperNodes, config.ConsumerGroupConfig)
 	if err != nil {
-		log.WithError(err).WithField("method", "NewConsumer").Error("Error creating Kafka consumer")
+		config.Logger.WithError(err).
+			WithField("method", "NewConsumer").
+			Error("Error creating Kafka consumer")
 		return nil, err
 	}
 
@@ -84,18 +92,31 @@ func NewConsumer(config Config) (Consumer, error) {
 		consumer:       consumer,
 		config:         config.ConsumerGroupConfig,
 		errCh:          config.Err,
+		logger:         config.Logger,
 	}, nil
 }
 
-func NewPerseverantConsumer(zookeeperConnectionString string, consumerGroup string, topics []string, config *consumergroup.Config, retryInterval time.Duration, errCh *chan error) (Consumer, error) {
-	consumer := &perseverantConsumer{sync.RWMutex{}, zookeeperConnectionString, consumerGroup, topics, config, nil, retryInterval, errCh}
+func NewPerseverantConsumer(zookeeperConnectionString string, consumerGroup string, topics []string, config *consumergroup.Config, retryInterval time.Duration, errCh *chan error, logger *logger.UPPLogger) (Consumer, error) {
+	consumer := &perseverantConsumer{
+		RWMutex:                   sync.RWMutex{},
+		zookeeperConnectionString: zookeeperConnectionString,
+		consumerGroup:             consumerGroup,
+		topics:                    topics,
+		config:                    config,
+		retryInterval:             retryInterval,
+		errCh:                     errCh,
+		logger:                    logger,
+	}
 	return consumer, nil
 }
 
 func (c *MessageConsumer) StartListening(messageHandler func(message FTMessage) error) {
 	go func() {
+		c.logger.Debug("Start listening for consumer errors")
 		for err := range c.consumer.Errors() {
-			log.WithError(err).WithField("method", "StartListening").Error("Error proccessing message")
+			c.logger.WithError(err).
+				WithField("method", "StartListening").
+				Error("error processing message")
 
 			if c.errCh != nil {
 				c.errCh <- err
@@ -105,10 +126,16 @@ func (c *MessageConsumer) StartListening(messageHandler func(message FTMessage) 
 
 	go func() {
 		for message := range c.consumer.Messages() {
+			c.logger.Debug("start listening for messages")
+
 			ftMsg := rawToFTMessage(message.Value)
 			err := messageHandler(ftMsg)
 			if err != nil {
-				log.WithError(err).WithField("method", "StartListening").WithField("messageKey", message.Key).Error("Error processing message")
+				c.logger.WithError(err).
+					WithField("method", "StartListening").
+					WithField("messageKey", message.Key).
+					Error("Error processing message")
+
 				if c.errCh != nil {
 					c.errCh <- err
 				}
@@ -120,7 +147,10 @@ func (c *MessageConsumer) StartListening(messageHandler func(message FTMessage) 
 
 func (c *MessageConsumer) Shutdown() {
 	if err := c.consumer.Close(); err != nil {
-		log.WithError(err).WithField("method", "Shutdown").Error("Error closing the consumer")
+		c.logger.WithError(err).
+			WithField("method", "Shutdown").
+			Error("Error closing consumer")
+
 		if c.errCh != nil {
 			c.errCh <- err
 		}
@@ -135,6 +165,7 @@ func (c *MessageConsumer) ConnectivityCheck() error {
 		ConsumerGroup:             c.consumerGroup + "-healthcheck",
 		Topics:                    c.topics,
 		ConsumerGroupConfig:       c.config,
+		Logger:                    c.logger,
 	}
 	healthcheckConsumer, err := NewConsumer(config)
 	if err != nil {
@@ -146,7 +177,9 @@ func (c *MessageConsumer) ConnectivityCheck() error {
 }
 
 func (c *perseverantConsumer) connect() {
-	connectorLog := log.WithField("zookeeper", c.zookeeperConnectionString).WithField("topics", c.topics).WithField("consumerGroup", c.consumerGroup)
+	connectorLog := c.logger.WithField("zookeeper", c.zookeeperConnectionString).
+		WithField("topics", c.topics).
+		WithField("consumerGroup", c.consumerGroup)
 	for {
 		var errCh chan error
 		if c.errCh != nil {
@@ -159,6 +192,7 @@ func (c *perseverantConsumer) connect() {
 			Topics:                    c.topics,
 			ConsumerGroupConfig:       c.config,
 			Err:                       errCh,
+			Logger:                    c.logger,
 		})
 
 		if err == nil {
@@ -211,7 +245,7 @@ func (c *perseverantConsumer) ConnectivityCheck() error {
 	defer c.RUnlock()
 
 	if !c.isConnected() {
-		return errors.New(errConsumerNotConnected)
+		return fmt.Errorf(errConsumerNotConnected)
 	}
 
 	return c.consumer.ConnectivityCheck()
