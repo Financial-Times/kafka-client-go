@@ -2,6 +2,8 @@ package kafka
 
 import (
 	"fmt"
+	"io/ioutil"
+	standardlog "log"
 	"strings"
 	"sync"
 	"time"
@@ -255,5 +257,6 @@ func DefaultConsumerConfig() *consumergroup.Config {
 	config := consumergroup.NewConfig()
 	config.Offsets.Initial = sarama.OffsetNewest
 	config.Offsets.ProcessingTimeout = 10 * time.Second
+	config.Zookeeper.Logger = standardlog.New(ioutil.Discard, "", 0)
 	return config
 }

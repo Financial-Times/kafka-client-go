@@ -18,7 +18,7 @@ require (
 	github.com/pkg/errors v0.8.0
 	github.com/rcrowley/go-metrics v0.0.0-20161128210544-1f30fe9094a5 // indirect
 	github.com/samuel/go-zookeeper v0.0.0-20170815201139-e6b59f6144be // indirect
-	github.com/sirupsen/logrus v1.0.5
+	github.com/sirupsen/logrus v1.0.5 // indirect
 	github.com/stretchr/objx v0.0.0-20150928122152-1a9d0bb9f541 // indirect
 	github.com/stretchr/testify v1.1.4
 	github.com/wvanbergen/kazoo-go v0.0.0-20171110111202-494a179ad10a
