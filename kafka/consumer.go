@@ -1,262 +1,179 @@
 package kafka
 
 import (
+	"context"
 	"fmt"
-	"io/ioutil"
-	standardlog "log"
+	"math/rand"
 	"strings"
 	"sync"
 	"time"
 
-	logger "github.com/Financial-Times/go-logger/v2"
-	"github.com/Financial-Times/kafka/consumergroup"
+	"github.com/Financial-Times/go-logger/v2"
 	"github.com/Shopify/sarama"
-	"github.com/wvanbergen/kazoo-go"
 )
 
 const errConsumerNotConnected = "consumer is not connected to Kafka"
 
-type ConsumerGrouper interface {
-	Errors() <-chan error
-	Messages() <-chan *sarama.ConsumerMessage
-	CommitUpto(message *sarama.ConsumerMessage) error
-	Close() error
-	Closed() bool
+// Consumer which will keep trying to reconnect to Kafka on a specified interval.
+// The underlying consumer group is created lazily when message listening is started.
+type Consumer struct {
+	config            ConsumerConfig
+	consumerGroupLock *sync.RWMutex
+	consumerGroup     sarama.ConsumerGroup
+	retryInterval     time.Duration
+	logger            *logger.UPPLogger
+	closed            chan struct{}
 }
 
-type Consumer interface {
-	StartListening(messageHandler func(message FTMessage) error)
-	Shutdown()
-	ConnectivityCheck() error
+type ConsumerConfig struct {
+	BrokersConnectionString string
+	ConsumerGroup           string
+	Topics                  []string
+	Options                 *sarama.Config
 }
 
-type MessageConsumer struct {
-	topics         []string
-	consumerGroup  string
-	zookeeperNodes []string
-	consumer       ConsumerGrouper
-	config         *consumergroup.Config
-	errCh          chan error
-	logger         *logger.UPPLogger
-}
-
-type perseverantConsumer struct {
-	sync.RWMutex
-	zookeeperConnectionString string
-	consumerGroup             string
-	topics                    []string
-	config                    *consumergroup.Config
-	consumer                  Consumer
-	retryInterval             time.Duration
-	errCh                     *chan error
-	logger                    *logger.UPPLogger
-}
-
-type Config struct {
-	ZookeeperConnectionString string
-	ConsumerGroup             string
-	Topics                    []string
-	ConsumerGroupConfig       *consumergroup.Config
-	Err                       chan error
-	Logger                    *logger.UPPLogger
-}
-
-func NewConsumer(config Config) (Consumer, error) {
-	config.Logger.Debug("Creating new consumer")
-
-	zookeeperNodes, chroot := kazoo.ParseConnectionString(config.ZookeeperConnectionString)
-
-	if config.ConsumerGroupConfig == nil {
-		config.ConsumerGroupConfig = DefaultConsumerConfig()
-		config.ConsumerGroupConfig.Zookeeper.Chroot = chroot
-	} else if config.ConsumerGroupConfig.Zookeeper.Chroot != chroot {
-		errorMessage := "mismatch in Zookeeper config while creating Kafka consumer"
-		config.Logger.
-			WithField("method", "NewConsumer").
-			WithField("configuredChroot", config.ConsumerGroupConfig.Zookeeper.Chroot).
-			WithField("parsedChroot", chroot).
-			Error(errorMessage)
-		return nil, fmt.Errorf(errorMessage)
+func NewConsumer(config ConsumerConfig, log *logger.UPPLogger, retryInterval time.Duration) *Consumer {
+	consumer := &Consumer{
+		config:            config,
+		consumerGroupLock: &sync.RWMutex{},
+		retryInterval:     retryInterval,
+		logger:            log,
+		closed:            make(chan struct{}),
 	}
-
-	consumer, err := consumergroup.JoinConsumerGroup(config.ConsumerGroup, config.Topics, zookeeperNodes, config.ConsumerGroupConfig)
-	if err != nil {
-		config.Logger.WithError(err).
-			WithField("method", "NewConsumer").
-			Error("Error creating Kafka consumer")
-		return nil, err
-	}
-
-	return &MessageConsumer{
-		topics:         config.Topics,
-		consumerGroup:  config.ConsumerGroup,
-		zookeeperNodes: zookeeperNodes,
-		consumer:       consumer,
-		config:         config.ConsumerGroupConfig,
-		errCh:          config.Err,
-		logger:         config.Logger,
-	}, nil
+	return consumer
 }
 
-func NewPerseverantConsumer(zookeeperConnectionString string, consumerGroup string, topics []string, config *consumergroup.Config, retryInterval time.Duration, errCh *chan error, logger *logger.UPPLogger) (Consumer, error) {
-	consumer := &perseverantConsumer{
-		RWMutex:                   sync.RWMutex{},
-		zookeeperConnectionString: zookeeperConnectionString,
-		consumerGroup:             consumerGroup,
-		topics:                    topics,
-		config:                    config,
-		retryInterval:             retryInterval,
-		errCh:                     errCh,
-		logger:                    logger,
-	}
-	return consumer, nil
-}
+// connect will attempt to create a new consumer continuously until successful.
+func (c *Consumer) connect() {
+	connectorLog := c.logger.
+		WithField("brokers", c.config.BrokersConnectionString).
+		WithField("topics", c.config.Topics).
+		WithField("consumer_group", c.config.ConsumerGroup)
 
-func (c *MessageConsumer) StartListening(messageHandler func(message FTMessage) error) {
-	go func() {
-		c.logger.Debug("Start listening for consumer errors")
-		for err := range c.consumer.Errors() {
-			c.logger.WithError(err).
-				WithField("method", "StartListening").
-				Error("error processing message")
-
-			if c.errCh != nil {
-				c.errCh <- err
-			}
-		}
-	}()
-
-	go func() {
-		for message := range c.consumer.Messages() {
-			c.logger.Debug("start listening for messages")
-
-			ftMsg := rawToFTMessage(message.Value)
-			err := messageHandler(ftMsg)
-			if err != nil {
-				c.logger.WithError(err).
-					WithField("method", "StartListening").
-					WithField("messageKey", message.Key).
-					Error("Error processing message")
-
-				if c.errCh != nil {
-					c.errCh <- err
-				}
-			}
-			c.consumer.CommitUpto(message)
-		}
-	}()
-}
-
-func (c *MessageConsumer) Shutdown() {
-	if err := c.consumer.Close(); err != nil {
-		c.logger.WithError(err).
-			WithField("method", "Shutdown").
-			Error("Error closing consumer")
-
-		if c.errCh != nil {
-			c.errCh <- err
-		}
-	}
-}
-
-func (c *MessageConsumer) ConnectivityCheck() error {
-	// establishing (or failing to establish) a new connection (with a distinct consumer group) is a reasonable check
-	// as experiment shows the consumer's existing connection is automatically repaired after any interruption
-	config := Config{
-		ZookeeperConnectionString: strings.Join(c.zookeeperNodes, ","),
-		ConsumerGroup:             c.consumerGroup + "-healthcheck",
-		Topics:                    c.topics,
-		ConsumerGroupConfig:       c.config,
-		Logger:                    c.logger,
-	}
-	healthcheckConsumer, err := NewConsumer(config)
-	if err != nil {
-		return err
-	}
-	defer healthcheckConsumer.Shutdown()
-
-	return nil
-}
-
-func (c *perseverantConsumer) connect() {
-	connectorLog := c.logger.WithField("zookeeper", c.zookeeperConnectionString).
-		WithField("topics", c.topics).
-		WithField("consumerGroup", c.consumerGroup)
 	for {
-		var errCh chan error
-		if c.errCh != nil {
-			errCh = *c.errCh
-		}
-
-		consumer, err := NewConsumer(Config{
-			ZookeeperConnectionString: c.zookeeperConnectionString,
-			ConsumerGroup:             c.consumerGroup,
-			Topics:                    c.topics,
-			ConsumerGroupConfig:       c.config,
-			Err:                       errCh,
-			Logger:                    c.logger,
-		})
-
+		consumerGroup, err := newConsumerGroup(c.config)
 		if err == nil {
-			connectorLog.Info("connected to Kafka consumer")
-			c.setConsumer(consumer)
+			connectorLog.Info("Connected to Kafka consumer group")
+			c.setConsumerGroup(consumerGroup)
 			break
 		}
 
-		connectorLog.WithError(err).Warn(errConsumerNotConnected)
+		connectorLog.WithError(err).Warn("Error creating Kafka consumer group")
 		time.Sleep(c.retryInterval)
 	}
 }
 
-func (c *perseverantConsumer) setConsumer(consumer Consumer) {
-	c.Lock()
-	defer c.Unlock()
+// setConsumerGroup sets the Consumer's consumer group.
+func (c *Consumer) setConsumerGroup(consumerGroup sarama.ConsumerGroup) {
+	c.consumerGroupLock.Lock()
+	defer c.consumerGroupLock.Unlock()
 
-	c.consumer = consumer
+	c.consumerGroup = consumerGroup
 }
 
-func (c *perseverantConsumer) isConnected() bool {
-	c.RLock()
-	defer c.RUnlock()
+// isConnected returns whether the consumer group is set.
+// It is only set if a successful connection is established.
+func (c *Consumer) isConnected() bool {
+	c.consumerGroupLock.RLock()
+	defer c.consumerGroupLock.RUnlock()
 
-	return c.consumer != nil
+	return c.consumerGroup != nil
 }
 
-func (c *perseverantConsumer) StartListening(messageHandler func(message FTMessage) error) {
+// StartListening is a blocking call that tries to establish a connection to Kafka and then starts listening.
+func (c *Consumer) StartListening(messageHandler func(message FTMessage)) {
 	if !c.isConnected() {
 		c.connect()
 	}
 
-	c.RLock()
-	defer c.RUnlock()
+	handler := newConsumerHandler(c.logger, messageHandler)
 
-	c.consumer.StartListening(messageHandler)
+	go func() {
+		for err := range c.consumerGroup.Errors() {
+			c.logger.WithError(err).
+				WithField("method", "StartListening").
+				Error("Error processing message")
+		}
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	go func() {
+		for {
+			if err := c.consumerGroup.Consume(ctx, c.config.Topics, handler); err != nil {
+				c.logger.WithError(err).
+					WithField("method", "StartListening").
+					Error("Error starting consumer")
+			}
+			// Check if context was cancelled, signaling that the consumer should stop.
+			if ctx.Err() != nil {
+				return
+			}
+		}
+	}()
+
+	go func() {
+		for {
+			select {
+			case <-handler.ready:
+				c.logger.Debug("New consumer group session starting...")
+			case <-c.closed:
+				// Terminate the message consumption.
+				cancel()
+				return
+			}
+		}
+	}()
+
+	c.logger.Info("Starting consumer...")
 }
 
-func (c *perseverantConsumer) Shutdown() {
-	c.RLock()
-	defer c.RUnlock()
-
+// Close closes the consumer connection to Kafka if the consumer is connected.
+func (c *Consumer) Close() error {
 	if c.isConnected() {
-		c.consumer.Shutdown()
+		close(c.closed)
+
+		return c.consumerGroup.Close()
 	}
+
+	return nil
 }
 
-func (c *perseverantConsumer) ConnectivityCheck() error {
-	c.RLock()
-	defer c.RUnlock()
-
+// ConnectivityCheck checks whether a connection to Kafka can be established.
+func (c *Consumer) ConnectivityCheck() error {
 	if !c.isConnected() {
 		return fmt.Errorf(errConsumerNotConnected)
 	}
 
-	return c.consumer.ConnectivityCheck()
+	config := ConsumerConfig{
+		BrokersConnectionString: c.config.BrokersConnectionString,
+		ConsumerGroup:           fmt.Sprintf("healthcheck-%d", rand.Intn(100)),
+		Topics:                  c.config.Topics,
+		Options:                 c.config.Options,
+	}
+	consumerGroup, err := newConsumerGroup(config)
+	if err != nil {
+		return err
+	}
+
+	_ = consumerGroup.Close()
+
+	return nil
 }
 
-func DefaultConsumerConfig() *consumergroup.Config {
-	config := consumergroup.NewConfig()
-	config.Offsets.Initial = sarama.OffsetNewest
-	config.Offsets.ProcessingTimeout = 10 * time.Second
-	config.Zookeeper.Logger = standardlog.New(ioutil.Discard, "", 0)
+func newConsumerGroup(config ConsumerConfig) (sarama.ConsumerGroup, error) {
+	if config.Options == nil {
+		config.Options = DefaultConsumerOptions()
+	}
+
+	brokers := strings.Split(config.BrokersConnectionString, ",")
+	return sarama.NewConsumerGroup(brokers, config.ConsumerGroup, config.Options)
+}
+
+// DefaultConsumerOptions returns a new sarama configuration with predefined default settings.
+func DefaultConsumerOptions() *sarama.Config {
+	config := sarama.NewConfig()
+	config.Consumer.Offsets.Initial = sarama.OffsetNewest
+	config.Consumer.MaxProcessingTime = 10 * time.Second
 	return config
 }

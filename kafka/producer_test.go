@@ -3,134 +3,102 @@ package kafka
 import (
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
-	logger "github.com/Financial-Times/go-logger/v2"
+	"github.com/Financial-Times/go-logger/v2"
 	"github.com/Shopify/sarama/mocks"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 const (
-	testBrokers = "127.0.0.1:9092"
+	testBrokers = "localhost:29092"
 	testTopic   = "testTopic"
 )
 
-type mockProducer struct {
-	mock.Mock
+func NewMockProducer(t *testing.T, brokers string, topic string) *Producer {
+	producer := mocks.NewSyncProducer(t, nil)
+	producer.ExpectSendMessageAndSucceed()
+
+	return &Producer{
+		config: ProducerConfig{
+			BrokersConnectionString: brokers,
+			Topic:                   topic,
+		},
+		producerLock: &sync.RWMutex{},
+		producer:     producer,
+	}
 }
 
-func (p *mockProducer) SendMessage(message FTMessage) error {
-	args := p.Called(message)
-	return args.Error(0)
+func TestProducer_SendMessage(t *testing.T) {
+	producer := NewMockProducer(t, testBrokers, testTopic)
+
+	msg := FTMessage{
+		Headers: map[string]string{
+			"X-Request-Id": "test",
+		},
+		Body: `{"foo":"bar"}`,
+	}
+	assert.NoError(t, producer.SendMessage(msg))
+
+	assert.NoError(t, producer.Close())
 }
 
-func (p *mockProducer) ConnectivityCheck() error {
-	args := p.Called()
-	return args.Error(0)
-}
-
-func (p *mockProducer) Shutdown() {
-	p.Called()
-}
-
-func NewTestProducer(t *testing.T, brokers string, topic string) (Producer, error) {
-	msp := mocks.NewSyncProducer(t, nil)
-	brokerSlice := strings.Split(brokers, ",")
-
-	msp.ExpectSendMessageAndSucceed()
-
-	return &MessageProducer{
-		brokers:  brokerSlice,
-		topic:    topic,
-		producer: msp,
-	}, nil
-}
-
-func TestNewProducer(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping test as it requires a connection to Kafka.")
+func TestProducer_SendMessage_NoConnection(t *testing.T) {
+	producer := Producer{
+		producerLock: &sync.RWMutex{},
 	}
 
-	log := logger.NewUPPLogger("test", "INFO")
-	producer, err := NewProducer(testBrokers, testTopic, DefaultProducerConfig(), log)
+	msg := FTMessage{
+		Headers: map[string]string{
+			"X-Request-Id": "test",
+		},
+		Body: `{"foo":"bar"}`,
+	}
 
-	assert.NoError(t, err)
-
-	err = producer.ConnectivityCheck()
-	assert.NoError(t, err)
-
-	assert.Equal(t, 16777216, producer.(*MessageProducer).config.Producer.MaxMessageBytes, "maximum message size using default config")
+	err := producer.SendMessage(msg)
+	assert.EqualError(t, err, errProducerNotConnected)
 }
 
-func TestNewProducerBadUrl(t *testing.T) {
+func TestProducer_InvalidConnection(t *testing.T) {
 	server := httptest.NewServer(nil)
 	kURL := server.URL[strings.LastIndex(server.URL, "/")+1:]
 	server.Close()
 
-	log := logger.NewUPPLogger("test", "INFO")
-	_, err := NewProducer(kURL, testTopic, DefaultProducerConfig(), log)
+	config := ProducerConfig{
+		BrokersConnectionString: kURL,
+		Topic:                   testTopic,
+		Options:                 DefaultProducerOptions(),
+	}
 
+	_, err := newProducer(config)
 	assert.Error(t, err)
 }
 
-func TestClient_SendMessage(t *testing.T) {
-	kc, _ := NewTestProducer(t, testBrokers, testTopic)
-	kc.SendMessage(NewFTMessage(nil, "Body"))
+func NewKafkaProducer(topic string) *Producer {
+	log := logger.NewUPPLogger("test", "INFO")
+	config := ProducerConfig{
+		BrokersConnectionString: testBrokers,
+		Topic:                   topic,
+		Options:                 DefaultProducerOptions(),
+	}
+
+	producer := NewProducer(config, log, 0, time.Second)
+
+	time.Sleep(time.Second) // Let connection take place.
+
+	return producer
 }
 
-func TestNewPerseverantProducer(t *testing.T) {
+func TestProducer_KafkaConnection(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping test as it requires a connection to Kafka.")
 	}
 
-	log := logger.NewUPPLogger("test", "INFO")
-	producer, err := NewPerseverantProducer(testBrokers, testTopic, nil, 0, time.Second, log)
-	assert.NoError(t, err)
-
-	time.Sleep(time.Second)
-
-	err = producer.ConnectivityCheck()
-	assert.NoError(t, err)
-}
-
-func TestNewPerseverantProducerNotConnected(t *testing.T) {
-	server := httptest.NewServer(nil)
-	kURL := server.URL[strings.LastIndex(server.URL, "/")+1:]
-	server.Close()
-
-	log := logger.NewUPPLogger("test", "INFO")
-	producer, err := NewPerseverantProducer(kURL, testTopic, nil, 0, time.Second, log)
-	assert.NoError(t, err)
-
-	err = producer.ConnectivityCheck()
-	assert.EqualError(t, err, errProducerNotConnected)
-}
-
-func TestNewPerseverantProducerWithInitialDelay(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping test as it requires a connection to Kafka.")
-	}
-
-	log := logger.NewUPPLogger("test", "INFO")
-	producer, err := NewPerseverantProducer(testBrokers, testTopic, nil, time.Second, time.Second, log)
-	assert.NoError(t, err)
-
-	err = producer.ConnectivityCheck()
-	assert.EqualError(t, err, errProducerNotConnected)
-
-	time.Sleep(2 * time.Second)
-	err = producer.ConnectivityCheck()
-	assert.NoError(t, err)
-}
-
-func TestPerseverantProducerForwardsToProducer(t *testing.T) {
-	mp := mockProducer{}
-	mp.On("SendMessage", mock.AnythingOfType("kafka.FTMessage")).Return(nil)
-	mp.On("Shutdown").Return()
-
-	p := perseverantProducer{producer: &mp}
+	producer := NewKafkaProducer(testTopic)
+	require.NoError(t, producer.ConnectivityCheck())
 
 	msg := FTMessage{
 		Headers: map[string]string{
@@ -138,25 +106,7 @@ func TestPerseverantProducerForwardsToProducer(t *testing.T) {
 		},
 		Body: `{"foo":"bar"}`,
 	}
+	assert.NoError(t, producer.SendMessage(msg))
 
-	actual := p.SendMessage(msg)
-	assert.NoError(t, actual)
-
-	p.Shutdown()
-
-	mp.AssertExpectations(t)
-}
-
-func TestPerseverantProducerNotConnectedCannotSendMessages(t *testing.T) {
-	p := perseverantProducer{}
-
-	msg := FTMessage{
-		Headers: map[string]string{
-			"X-Request-Id": "test",
-		},
-		Body: `{"foo":"bar"}`,
-	}
-
-	actual := p.SendMessage(msg)
-	assert.EqualError(t, actual, errProducerNotConnected)
+	assert.NoError(t, producer.Close())
 }

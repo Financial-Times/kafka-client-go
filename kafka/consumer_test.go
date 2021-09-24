@@ -1,303 +1,203 @@
 package kafka
 
 import (
-	"net/http/httptest"
-	"strings"
+	"context"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	logger "github.com/Financial-Times/go-logger/v2"
-	"github.com/Financial-Times/kafka/consumergroup"
+	"github.com/Financial-Times/go-logger/v2"
 	"github.com/Shopify/sarama"
-	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-const (
-	zookeeperConnectionString = "127.0.0.1:2181"
-	testConsumerGroup         = "testgroup"
-)
+const testConsumerGroup = "testgroup"
 
-var expectedErrors = []error{errors.New("booster Separation Failure"), errors.New("payload missing")}
 var messages = []*sarama.ConsumerMessage{{Value: []byte("Message1")}, {Value: []byte("Message2")}}
 
-func TestNewConsumer(t *testing.T) {
+func TestConsumerGroup_KafkaConnection(t *testing.T) {
 	if testing.Short() {
-		t.Skip("Skipping test as it requires a connection to Zookeeper.")
-	}
-	config := consumergroup.NewConfig()
-	config.Offsets.Initial = sarama.OffsetNewest
-	config.Offsets.ProcessingTimeout = 10 * time.Second
-
-	errCh := make(chan error, 1)
-	defer close(errCh)
-
-	log := logger.NewUPPLogger("test", "INFO")
-	consumer, err := NewConsumer(Config{
-		ZookeeperConnectionString: zookeeperConnectionString,
-		ConsumerGroup:             testConsumerGroup,
-		Topics:                    []string{testTopic},
-		ConsumerGroupConfig:       config,
-		Err:                       errCh,
-		Logger:                    log,
-	})
-	assert.NoError(t, err)
-
-	err = consumer.ConnectivityCheck()
-	assert.NoError(t, err)
-
-	select {
-	case actualError := <-errCh:
-		assert.NotNil(t, actualError, "Was not expecting error from consumer.")
-	default:
+		t.Skip("Skipping test as it requires a connection to Kafka.")
 	}
 
-	consumer.Shutdown()
+	config := ConsumerConfig{
+		BrokersConnectionString: testBrokers,
+		ConsumerGroup:           testConsumerGroup,
+		Topics:                  []string{testTopic},
+		Options:                 DefaultConsumerOptions(),
+	}
+
+	consumerGroup, err := newConsumerGroup(config)
+	require.NoError(t, err)
+
+	assert.NoError(t, consumerGroup.Close())
 }
 
-func TestConsumerNotConnectedConnectivityCheckError(t *testing.T) {
-	server := httptest.NewServer(nil)
-	zkURL := server.URL[strings.LastIndex(server.URL, "/")+1:]
-	server.Close()
-
+func TestConsumer_InvalidConnection(t *testing.T) {
 	log := logger.NewUPPLogger("test", "INFO")
-	consumer := MessageConsumer{zookeeperNodes: []string{zkURL}, consumerGroup: testConsumerGroup, topics: []string{testTopic}, config: nil, logger: log}
-
-	err := consumer.ConnectivityCheck()
-	assert.Error(t, err)
-}
-
-func TestNewPerseverantConsumer(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping test as it requires a connection to Zookeeper.")
+	consumer := Consumer{
+		config: ConsumerConfig{
+			BrokersConnectionString: "unknown:9092",
+			ConsumerGroup:           testConsumerGroup,
+			Topics:                  []string{testTopic},
+			Options:                 nil,
+		},
+		consumerGroupLock: &sync.RWMutex{},
+		logger:            log,
 	}
 
+	assert.Error(t, consumer.ConnectivityCheck())
+}
+
+func NewKafkaConsumer(topic string) *Consumer {
 	log := logger.NewUPPLogger("test", "INFO")
-	consumer, err := NewPerseverantConsumer(zookeeperConnectionString, testConsumerGroup, []string{testTopic}, nil, time.Second, nil, log)
-	assert.NoError(t, err)
+	config := ConsumerConfig{
+		BrokersConnectionString: testBrokers,
+		ConsumerGroup:           testConsumerGroup,
+		Topics:                  []string{topic},
+		Options:                 DefaultConsumerOptions(),
+	}
 
-	err = consumer.ConnectivityCheck()
-	assert.EqualError(t, err, errConsumerNotConnected)
+	return NewConsumer(config, log, time.Second)
+}
 
-	consumer.StartListening(func(msg FTMessage) error { return nil })
+func TestKafkaConsumer_StartListening(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping test as it requires a connection to Kafka.")
+	}
 
-	err = consumer.ConnectivityCheck()
-	assert.NoError(t, err)
+	consumer := NewKafkaConsumer(testTopic)
 
-	// avoid race condition within consumer_group library by delaying the shutdown
-	// (it's not a normal case to create a consumer and immediately close it)
-	time.Sleep(time.Second)
+	go consumer.StartListening(func(msg FTMessage) {})
+	time.Sleep(5 * time.Second)
 
-	consumer.Shutdown()
+	require.NoError(t, consumer.ConnectivityCheck())
+
+	assert.NoError(t, consumer.Close())
+}
+
+type MockConsumerGroupClaim struct {
+	messages []*sarama.ConsumerMessage
+}
+
+func (c *MockConsumerGroupClaim) Topic() string {
+	return ""
+}
+
+func (c *MockConsumerGroupClaim) Partition() int32 {
+	return 0
+}
+
+func (c *MockConsumerGroupClaim) InitialOffset() int64 {
+	return 0
+}
+
+func (c *MockConsumerGroupClaim) HighWaterMarkOffset() int64 {
+	return 0
+}
+
+func (c *MockConsumerGroupClaim) Messages() <-chan *sarama.ConsumerMessage {
+	outChan := make(chan *sarama.ConsumerMessage, len(c.messages))
+	defer close(outChan)
+
+	for _, v := range c.messages {
+		outChan <- v
+	}
+
+	return outChan
 }
 
 type MockConsumerGroup struct {
-	messages        []*sarama.ConsumerMessage
-	errors          []error
-	IsShutdown      bool
-	errorOnShutdown bool
+	messages []*sarama.ConsumerMessage
 }
 
 func (cg *MockConsumerGroup) Errors() <-chan error {
-	outChan := make(chan error, 100)
-	go func() {
-		defer close(outChan)
-		for _, v := range cg.errors {
-			outChan <- v
-		}
-	}()
-	return outChan
-}
-
-func (cg *MockConsumerGroup) Messages() <-chan *sarama.ConsumerMessage {
-	outChan := make(chan *sarama.ConsumerMessage, 100)
-	go func() {
-		defer close(outChan)
-		for _, v := range cg.messages {
-			outChan <- v
-		}
-	}()
-	return outChan
-}
-
-func (cg *MockConsumerGroup) CommitUpto(message *sarama.ConsumerMessage) error {
-	return nil
+	return make(chan error)
 }
 
 func (cg *MockConsumerGroup) Close() error {
-	cg.IsShutdown = true
-	if cg.errorOnShutdown {
-		return errors.New("foobar")
-	}
 	return nil
 }
 
-func (cg *MockConsumerGroup) Closed() bool {
-	return cg.IsShutdown
+func (cg *MockConsumerGroup) Consume(ctx context.Context, topics []string, handler sarama.ConsumerGroupHandler) error {
+	for _, v := range cg.messages {
+		session := &MockConsumerGroupSession{}
+		claim := &MockConsumerGroupClaim{
+			messages: []*sarama.ConsumerMessage{v},
+		}
+
+		_ = handler.ConsumeClaim(session, claim)
+	}
+
+	// We block here to simulate the behavior of the library
+	c := make(chan struct{})
+	<-c
+	return nil
 }
 
-func NewTestConsumerWithErrChan() (Consumer, chan error) {
-	errCh := make(chan error, len(expectedErrors))
+type MockConsumerGroupSession struct{}
 
-	log := logger.NewUPPLogger("test", "INFO")
-	return &MessageConsumer{
-		topics:         []string{"topic"},
-		consumerGroup:  "group",
-		zookeeperNodes: []string{"node"},
-		consumer: &MockConsumerGroup{
-			messages:        messages,
-			errors:          []error{},
-			IsShutdown:      false,
-			errorOnShutdown: true,
-		},
-		errCh:  errCh,
-		logger: log,
-	}, errCh
+func (m *MockConsumerGroupSession) Claims() map[string][]int32 {
+	return make(map[string][]int32)
 }
 
-func NewTestConsumerWithErrors() (Consumer, chan error) {
-	errCh := make(chan error, len(expectedErrors))
-	log := logger.NewUPPLogger("test", "INFO")
-	return &MessageConsumer{
-		topics:         []string{"topic"},
-		consumerGroup:  "group",
-		zookeeperNodes: []string{"node"},
-		consumer: &MockConsumerGroup{
-			messages:   messages,
-			errors:     expectedErrors,
-			IsShutdown: false,
-		},
-		errCh:  errCh,
-		logger: log,
-	}, errCh
+func (m *MockConsumerGroupSession) MemberID() string {
+	return ""
 }
 
-func NewTestConsumer() Consumer {
+func (m *MockConsumerGroupSession) GenerationID() int32 {
+	return 1
+}
+
+func (m *MockConsumerGroupSession) MarkOffset(topic string, partition int32, offset int64, metadata string) {
+
+}
+
+func (m *MockConsumerGroupSession) Commit() {
+
+}
+
+func (m *MockConsumerGroupSession) ResetOffset(topic string, partition int32, offset int64, metadata string) {
+
+}
+
+func (m *MockConsumerGroupSession) MarkMessage(msg *sarama.ConsumerMessage, metadata string) {
+
+}
+
+func (m *MockConsumerGroupSession) Context() context.Context {
+	return context.TODO()
+}
+
+func NewMockConsumer() *Consumer {
 	log := logger.NewUPPLogger("test", "INFO")
-	return &MessageConsumer{
-		topics:         []string{"topic"},
-		consumerGroup:  "group",
-		zookeeperNodes: []string{"node"},
-		consumer: &MockConsumerGroup{
-			messages:   messages,
-			errors:     []error{},
-			IsShutdown: false,
+	return &Consumer{
+		config: ConsumerConfig{
+			Topics:                  []string{"topic"},
+			ConsumerGroup:           "group",
+			BrokersConnectionString: "node",
+		},
+		consumerGroupLock: &sync.RWMutex{},
+		consumerGroup: &MockConsumerGroup{
+			messages: messages,
 		},
 		logger: log,
+		closed: make(chan struct{}),
 	}
 }
 
-func TestErrorDuringShutdown(t *testing.T) {
-	consumer, errCh := NewTestConsumerWithErrChan()
-	defer close(errCh)
-
-	consumer.Shutdown()
-
-	var actualError error
-	select {
-	case actualError = <-errCh:
-		assert.NotNil(t, actualError, "Was expecting non-nil error on consumer shutdown")
-	default:
-		assert.NotNil(t, actualError, "Was expecting error on consumer shutdown")
-	}
-}
-
-func TestMessageConsumer_StartListeningConsumerErrors(t *testing.T) {
+func TestConsumer_StartListening(t *testing.T) {
 	var count int32
-	consumer, errChan := NewTestConsumerWithErrors()
-	defer close(errChan)
+	consumer := NewMockConsumer()
 
-	var actualErrors []error
-	stopChan := make(chan struct{})
-	stoppedChan := make(chan struct{})
-	go func() {
-		defer close(stoppedChan)
-		for {
-			select {
-			case actualError := <-errChan:
-				actualErrors = append(actualErrors, actualError)
-			case <-stopChan:
-				return
-			}
-		}
-	}()
-
-	consumer.StartListening(func(msg FTMessage) error {
+	consumer.StartListening(func(msg FTMessage) {
 		atomic.AddInt32(&count, 1)
-		return nil
 	})
-	time.Sleep(1 * time.Second)
 
-	close(stopChan)
-	<-stoppedChan
-	assert.Equal(t, int32(len(messages)), atomic.LoadInt32(&count))
-	assert.Equal(t, expectedErrors, actualErrors, "Didn't get the expected errors from the consumer.")
-}
-
-func TestMessageConsumer_StartListeningHandlerErrors(t *testing.T) {
-	var count int32
-	consumer, errChan := NewTestConsumerWithErrChan()
-	defer close(errChan)
-
-	var actualErrors []error
-	stopChan := make(chan struct{})
-	stoppedChan := make(chan struct{})
-	go func() {
-		defer close(stoppedChan)
-		for {
-			select {
-			case actualError := <-errChan:
-				actualErrors = append(actualErrors, actualError)
-			case <-stopChan:
-				return
-			}
-		}
-	}()
-
-	consumer.StartListening(func(msg FTMessage) error {
-		atomic.AddInt32(&count, 1)
-		return expectedErrors[atomic.LoadInt32(&count)-1]
-	})
-	time.Sleep(1 * time.Second)
-
-	close(stopChan)
-	<-stoppedChan
-	assert.Equal(t, int32(len(messages)), atomic.LoadInt32(&count))
-	assert.Equal(t, expectedErrors, actualErrors, "Didn't get the expected errors from the consumer handler.")
-}
-
-func TestMessageConsumer_StartListening(t *testing.T) {
-	var count int32
-	consumer := NewTestConsumer()
-	consumer.StartListening(func(msg FTMessage) error {
-		atomic.AddInt32(&count, 1)
-		return nil
-	})
-	time.Sleep(1 * time.Second)
-	assert.Equal(t, int32(len(messages)), atomic.LoadInt32(&count))
-}
-
-func TestMessageConsumerContinuesWhenHandlerReturnsError(t *testing.T) {
-	var count int32
-	consumer := NewTestConsumer()
-	consumer.StartListening(func(msg FTMessage) error {
-		atomic.AddInt32(&count, 1)
-		return errors.New("test error")
-	})
-	time.Sleep(1 * time.Second)
-	assert.Equal(t, int32(len(messages)), atomic.LoadInt32(&count))
-}
-
-func TestPerseverantConsumerListensToConsumer(t *testing.T) {
-	var count int32
-	consumer := perseverantConsumer{consumer: NewTestConsumer()}
-	consumer.StartListening(func(msg FTMessage) error {
-		atomic.AddInt32(&count, 1)
-		return nil
-	})
 	time.Sleep(1 * time.Second)
 	assert.Equal(t, int32(len(messages)), atomic.LoadInt32(&count))
 
-	consumer.Shutdown()
+	assert.NoError(t, consumer.Close())
 }

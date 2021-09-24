@@ -1,165 +1,136 @@
 package kafka
 
 import (
+	"fmt"
 	"strings"
 	"sync"
 	"time"
 
-	logger "github.com/Financial-Times/go-logger/v2"
+	"github.com/Financial-Times/go-logger/v2"
 	"github.com/Shopify/sarama"
-	"github.com/pkg/errors"
 )
 
 const errProducerNotConnected = "producer is not connected to Kafka"
 
-type Producer interface {
-	SendMessage(message FTMessage) error
-	ConnectivityCheck() error
-	Shutdown()
+// Producer which will keep trying to reconnect to Kafka on a specified interval.
+// The underlying producer is created in a separate go-routine when the Producer is initialized.
+type Producer struct {
+	config       ProducerConfig
+	producerLock *sync.RWMutex
+	producer     sarama.SyncProducer
+	logger       *logger.UPPLogger
 }
 
-type MessageProducer struct {
-	brokers  []string
-	topic    string
-	config   *sarama.Config
-	producer sarama.SyncProducer
-	logger   *logger.UPPLogger
+type ProducerConfig struct {
+	BrokersConnectionString string
+	Topic                   string
+	Options                 *sarama.Config
 }
 
-type perseverantProducer struct {
-	sync.RWMutex
-	brokers  string
-	topic    string
-	config   *sarama.Config
-	producer Producer
-	logger   *logger.UPPLogger
-}
-
-func NewProducer(brokers string, topic string, config *sarama.Config, logger *logger.UPPLogger) (Producer, error) {
-	if config == nil {
-		config = DefaultProducerConfig()
+func NewProducer(config ProducerConfig, logger *logger.UPPLogger, initialDelay, retryInterval time.Duration) *Producer {
+	producer := &Producer{
+		config:       config,
+		producerLock: &sync.RWMutex{},
+		logger:       logger,
 	}
-
-	brokerSlice := strings.Split(brokers, ",")
-
-	sp, err := sarama.NewSyncProducer(brokerSlice, config)
-	if err != nil {
-		logger.WithError(err).
-			WithField("method", "NewProducer").
-			Error("Error creating the producer")
-		return nil, err
-	}
-
-	return &MessageProducer{
-		brokers:  brokerSlice,
-		topic:    topic,
-		config:   config,
-		producer: sp,
-		logger:   logger,
-	}, nil
-}
-
-func NewPerseverantProducer(brokers string, topic string, config *sarama.Config, initialDelay time.Duration, retryInterval time.Duration, logger *logger.UPPLogger) (Producer, error) {
-	producer := &perseverantProducer{sync.RWMutex{}, brokers, topic, config, nil, logger}
 
 	go func() {
 		if initialDelay > 0 {
 			time.Sleep(initialDelay)
 		}
+
 		producer.connect(retryInterval)
 	}()
 
-	return producer, nil
+	return producer
 }
 
-func (p *MessageProducer) SendMessage(message FTMessage) error {
-	_, _, err := p.producer.SendMessage(&sarama.ProducerMessage{
-		Topic: p.topic,
-		Value: sarama.StringEncoder(message.Build()),
-	})
-	if err != nil {
-		p.logger.WithError(err).
-			WithField("method", "SendMessage").
-			Error("Error sending a Kafka message")
-	}
-	return err
-}
+// connect tries to establish a connection to Kafka and will retry endlessly.
+func (p *Producer) connect(retryInterval time.Duration) {
+	connectorLog := p.logger.
+		WithField("brokers", p.config.BrokersConnectionString).
+		WithField("topic", p.config.Topic)
 
-func (p *MessageProducer) Shutdown() {
-	if err := p.producer.Close(); err != nil {
-		p.logger.WithError(err).
-			WithField("method", "Shutdown").
-			Error("Error closing the producer")
-	}
-}
-
-func (p *MessageProducer) ConnectivityCheck() error {
-	// like the consumer check, establishing a new connection gives us some degree of confidence
-	tmp, err := NewProducer(strings.Join(p.brokers, ","), p.topic, p.config, p.logger)
-	if tmp != nil {
-		defer tmp.Shutdown()
-	}
-
-	return err
-}
-
-func (p *perseverantProducer) connect(retryInterval time.Duration) {
-	connectorLog := p.logger.WithField("brokers", p.brokers).
-		WithField("topic", p.topic)
 	for {
-		producer, err := NewProducer(p.brokers, p.topic, p.config, p.logger)
+		producer, err := newProducer(p.config)
 		if err == nil {
-			connectorLog.Info("connected to Kafka producer")
+			connectorLog.Info("Connected to Kafka producer")
 			p.setProducer(producer)
 			break
 		}
 
-		connectorLog.WithError(err).
-			Warn(errProducerNotConnected)
+		connectorLog.WithError(err).Warn("Error creating Kafka producer")
 		time.Sleep(retryInterval)
 	}
 }
 
-func (p *perseverantProducer) setProducer(producer Producer) {
-	p.Lock()
-	defer p.Unlock()
+// setProducer sets the underlying producer instance.
+func (p *Producer) setProducer(producer sarama.SyncProducer) {
+	p.producerLock.Lock()
+	defer p.producerLock.Unlock()
 
 	p.producer = producer
 }
 
-func (p *perseverantProducer) isConnected() bool {
-	p.RLock()
-	defer p.RUnlock()
+// isConnected returns whether the producer is set.
+// It is only set if a successful connection is established.
+func (p *Producer) isConnected() bool {
+	p.producerLock.RLock()
+	defer p.producerLock.RUnlock()
 
 	return p.producer != nil
 }
 
-func (p *perseverantProducer) SendMessage(message FTMessage) error {
+// SendMessage checks if the producer is connected, then sends a message to Kafka.
+func (p *Producer) SendMessage(message FTMessage) error {
 	if !p.isConnected() {
-		return errors.New(errProducerNotConnected)
+		return fmt.Errorf(errProducerNotConnected)
 	}
 
-	p.RLock()
-	defer p.RUnlock()
+	_, _, err := p.producer.SendMessage(&sarama.ProducerMessage{
+		Topic: p.config.Topic,
+		Value: sarama.StringEncoder(message.Build()),
+	})
 
-	return p.producer.SendMessage(message)
+	return err
 }
 
-func (p *perseverantProducer) Shutdown() {
+// Close closes the connection to Kafka if the producer is connected.
+func (p *Producer) Close() error {
 	if p.isConnected() {
-		p.producer.Shutdown()
+		return p.producer.Close()
 	}
+
+	return nil
 }
 
-func (p *perseverantProducer) ConnectivityCheck() error {
+// ConnectivityCheck checks whether a connection to Kafka can be established.
+func (p *Producer) ConnectivityCheck() error {
 	if !p.isConnected() {
-		return errors.New(errProducerNotConnected)
+		return fmt.Errorf(errProducerNotConnected)
 	}
 
-	return p.producer.ConnectivityCheck()
+	producer, err := newProducer(p.config)
+	if err != nil {
+		return err
+	}
+
+	_ = producer.Close()
+
+	return nil
 }
 
-func DefaultProducerConfig() *sarama.Config {
+func newProducer(config ProducerConfig) (sarama.SyncProducer, error) {
+	if config.Options == nil {
+		config.Options = DefaultProducerOptions()
+	}
+
+	brokers := strings.Split(config.BrokersConnectionString, ",")
+	return sarama.NewSyncProducer(brokers, config.Options)
+}
+
+// DefaultProducerOptions creates a new Sarama producer configuration with default values.
+func DefaultProducerOptions() *sarama.Config {
 	config := sarama.NewConfig()
 	config.Producer.MaxMessageBytes = 16777216
 	config.Producer.RequiredAcks = sarama.WaitForAll
