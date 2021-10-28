@@ -1,26 +1,32 @@
-module github.com/Financial-Times/kafka-client-go
+module github.com/Financial-Times/kafka-client-go/v2
 
-go 1.14
+go 1.17
 
 require (
 	github.com/Financial-Times/go-logger/v2 v2.0.1
-	github.com/Financial-Times/kafka v0.0.0-20181214115819-fddecb2b8f89
-	github.com/Shopify/sarama v1.12.0
-	github.com/Shopify/toxiproxy v2.1.4+incompatible // indirect
-	github.com/davecgh/go-spew v1.1.1-0.20170829195320-a47672248388 // indirect
-	github.com/eapache/go-resiliency v1.0.1-0.20170607163615-b1fe83b5b03f // indirect
-	github.com/eapache/go-xerial-snappy v0.0.0-20160609142408-bb955e01b934 // indirect
+	github.com/Shopify/sarama v1.30.0
+	github.com/stretchr/testify v1.7.0
+)
+
+require (
+	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/eapache/go-resiliency v1.2.0 // indirect
+	github.com/eapache/go-xerial-snappy v0.0.0-20180814174437-776d5712da21 // indirect
 	github.com/eapache/queue v1.1.0 // indirect
-	github.com/golang/snappy v0.0.0-20170215233205-553a64147049 // indirect
-	github.com/onsi/ginkgo v1.14.0 // indirect
-	github.com/pierrec/lz4 v1.0.1 // indirect
-	github.com/pierrec/xxHash v0.0.0-20170714082455-a0006b13c722 // indirect
-	github.com/pkg/errors v0.8.0
-	github.com/rcrowley/go-metrics v0.0.0-20161128210544-1f30fe9094a5 // indirect
-	github.com/samuel/go-zookeeper v0.0.0-20170815201139-e6b59f6144be // indirect
-	github.com/sirupsen/logrus v1.0.5 // indirect
-	github.com/stretchr/objx v0.0.0-20150928122152-1a9d0bb9f541 // indirect
-	github.com/stretchr/testify v1.1.4
-	github.com/wvanbergen/kazoo-go v0.0.0-20171110111202-494a179ad10a
-	golang.org/x/time v0.0.0-20181108054448-85acf8d2951c // indirect
+	github.com/golang/snappy v0.0.4 // indirect
+	github.com/hashicorp/go-uuid v1.0.2 // indirect
+	github.com/jcmturner/aescts/v2 v2.0.0 // indirect
+	github.com/jcmturner/dnsutils/v2 v2.0.0 // indirect
+	github.com/jcmturner/gofork v1.0.0 // indirect
+	github.com/jcmturner/gokrb5/v8 v8.4.2 // indirect
+	github.com/jcmturner/rpc/v2 v2.0.3 // indirect
+	github.com/klauspost/compress v1.13.6 // indirect
+	github.com/pierrec/lz4 v2.6.1+incompatible // indirect
+	github.com/pmezard/go-difflib v1.0.0 // indirect
+	github.com/rcrowley/go-metrics v0.0.0-20201227073835-cf1acfcdf475 // indirect
+	github.com/sirupsen/logrus v1.8.1 // indirect
+	golang.org/x/crypto v0.0.0-20210920023735-84f357641f63 // indirect
+	golang.org/x/net v0.0.0-20210917221730-978cfadd31cf // indirect
+	golang.org/x/sys v0.0.0-20210615035016-665e8c7367d1 // indirect
+	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b // indirect
 )
