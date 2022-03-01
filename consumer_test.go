@@ -121,6 +121,14 @@ func (cg *MockConsumerGroup) Close() error {
 	return nil
 }
 
+func (cg *MockConsumerGroup) Pause(partitions map[string][]int32) {}
+
+func (cg *MockConsumerGroup) Resume(partitions map[string][]int32) {}
+
+func (cg *MockConsumerGroup) PauseAll() {}
+
+func (cg *MockConsumerGroup) ResumeAll() {}
+
 func (cg *MockConsumerGroup) Consume(ctx context.Context, topics []string, handler sarama.ConsumerGroupHandler) error {
 	for _, v := range cg.messages {
 		session := &MockConsumerGroupSession{}
