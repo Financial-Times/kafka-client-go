@@ -1,6 +1,6 @@
 version: 2.1
 orbs:
-  snyk: snyk/snyk@0.0.10
+  snyk: snyk/snyk@1.1.2
 jobs:
   build:
     docker:
@@ -41,7 +41,7 @@ jobs:
           name: Get dependencies
           command: go mod download
       - run:
-          name: Sleep a bit
+          name: Wait for containers to spin up
           command: sleep 10;
       - run:
           name: Run Tests
