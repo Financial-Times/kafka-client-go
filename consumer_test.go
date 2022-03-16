@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const testConsumerGroup = "testgroup"
+const testConsumerGroup = "testGroup"
 
 var messages = []*sarama.ConsumerMessage{{Value: []byte("Message1")}, {Value: []byte("Message2")}}
 
@@ -25,7 +25,6 @@ func TestConsumerGroup_KafkaConnection(t *testing.T) {
 	config := ConsumerConfig{
 		BrokersConnectionString: testBrokers,
 		ConsumerGroup:           testConsumerGroup,
-		Topics:                  []string{testTopic},
 		Options:                 DefaultConsumerOptions(),
 	}
 
@@ -41,9 +40,8 @@ func TestConsumer_InvalidConnection(t *testing.T) {
 		config: ConsumerConfig{
 			BrokersConnectionString: "unknown:9092",
 			ConsumerGroup:           testConsumerGroup,
-			Topics:                  []string{testTopic},
-			Options:                 nil,
 		},
+		topics:            []*Topic{NewTopic(testTopic)},
 		consumerGroupLock: &sync.RWMutex{},
 		logger:            log,
 	}
@@ -56,11 +54,11 @@ func NewKafkaConsumer(topic string) *Consumer {
 	config := ConsumerConfig{
 		BrokersConnectionString: testBrokers,
 		ConsumerGroup:           testConsumerGroup,
-		Topics:                  []string{topic},
 		Options:                 DefaultConsumerOptions(),
 	}
+	topics := []*Topic{NewTopic(topic)}
 
-	return NewConsumer(config, log, time.Second)
+	return NewConsumer(config, topics, log, time.Second)
 }
 
 func TestKafkaConsumer_StartListening(t *testing.T) {
@@ -121,15 +119,15 @@ func (cg *MockConsumerGroup) Close() error {
 	return nil
 }
 
-func (cg *MockConsumerGroup) Pause(partitions map[string][]int32) {}
+func (cg *MockConsumerGroup) Pause(map[string][]int32) {}
 
-func (cg *MockConsumerGroup) Resume(partitions map[string][]int32) {}
+func (cg *MockConsumerGroup) Resume(map[string][]int32) {}
 
 func (cg *MockConsumerGroup) PauseAll() {}
 
 func (cg *MockConsumerGroup) ResumeAll() {}
 
-func (cg *MockConsumerGroup) Consume(ctx context.Context, topics []string, handler sarama.ConsumerGroupHandler) error {
+func (cg *MockConsumerGroup) Consume(_ context.Context, _ []string, handler sarama.ConsumerGroupHandler) error {
 	for _, v := range cg.messages {
 		session := &MockConsumerGroupSession{}
 		claim := &MockConsumerGroupClaim{
@@ -159,37 +157,43 @@ func (m *MockConsumerGroupSession) GenerationID() int32 {
 	return 1
 }
 
-func (m *MockConsumerGroupSession) MarkOffset(topic string, partition int32, offset int64, metadata string) {
+func (m *MockConsumerGroupSession) MarkOffset(string, int32, int64, string) {}
 
-}
+func (m *MockConsumerGroupSession) Commit() {}
 
-func (m *MockConsumerGroupSession) Commit() {
+func (m *MockConsumerGroupSession) ResetOffset(string, int32, int64, string) {}
 
-}
-
-func (m *MockConsumerGroupSession) ResetOffset(topic string, partition int32, offset int64, metadata string) {
-
-}
-
-func (m *MockConsumerGroupSession) MarkMessage(msg *sarama.ConsumerMessage, metadata string) {
-
-}
+func (m *MockConsumerGroupSession) MarkMessage(*sarama.ConsumerMessage, string) {}
 
 func (m *MockConsumerGroupSession) Context() context.Context {
-	return context.TODO()
+	return context.Background()
 }
 
 func NewMockConsumer() *Consumer {
 	log := logger.NewUPPLogger("test", "INFO")
+
 	return &Consumer{
 		config: ConsumerConfig{
-			Topics:                  []string{"topic"},
 			ConsumerGroup:           "group",
 			BrokersConnectionString: "node",
+		},
+		topics: []*Topic{
+			{
+				Name: testTopic,
+			},
 		},
 		consumerGroupLock: &sync.RWMutex{},
 		consumerGroup: &MockConsumerGroup{
 			messages: messages,
+		},
+		monitorLock: &sync.RWMutex{},
+		monitor: &consumerMonitor{
+			subscriptions: map[string]map[int32]int64{},
+			offsetFetcher: &offsetFetcherMock{},
+			scheduler: fetcherScheduler{
+				standardInterval: time.Minute,
+			},
+			logger: log,
 		},
 		logger: log,
 		closed: make(chan struct{}),
