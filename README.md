@@ -20,7 +20,7 @@ The library is NOT using Zookeeper to connect to Kafka under the hood.
 Importing:
 
 ```go
-    import "github.com/Financial-Times/kafka-client-go/v2"
+    import "github.com/Financial-Times/kafka-client-go/v3"
 ```
 
 ### Producer
@@ -69,14 +69,18 @@ Creating a consumer:
     config := kafka.ConsumerConfig{
         BrokersConnectionString: "", // Comma-separated list of Kafka brokers
         ConsumerGroup:           "", // Unique name of a consumer group
-        Topics:                  []string{}, // Comma-separated list of topics to consume from
+    }
+
+    topics := []*kafka.Topic{
+        kafka.NewTopic(""),                             // Topic to consume from
+        kafka.NewTopic("", kafka.WithLagTolerance(50)), // Topic to consume from with custom lag tolerance used for monitoring
     }
     
     retryInterval := time.Second // Duration between each retry for establishing connection
     
     logger := logger.NewUPPLogger(...)
 
-    consumer := kafka.NewConsumer(config, logger, retryInterval)
+    consumer := kafka.NewConsumer(config, topics, logger, retryInterval)
 ```
 
 Consuming messages:
