@@ -4,7 +4,7 @@ orbs:
 jobs:
   build:
     docker:
-      - image: golang:1
+      - image: golang:1.17
         environment:
           GOPATH: /go
           CIRCLE_TEST_REPORTS: /tmp/test-results
