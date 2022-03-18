@@ -112,6 +112,8 @@ func (m *consumerMonitor) run(ctx context.Context, subscriptionEvents chan *subs
 				continue
 			}
 
+			log.WithField("offsets", offsets).Debug("Offsets fetched successfully")
+
 			m.updateConsumerStatus(offsets)
 
 			if m.scheduler.failureCount != 0 {
