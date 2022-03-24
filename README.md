@@ -52,6 +52,13 @@ Sending a message:
     // Error handling
 ```
 
+The health of the Kafka cluster can be checked by attempting to establish separate connection with the provided configuration:
+
+```go
+   err := producer.ConnectivityCheck()
+   // Error handling
+```
+
 Connection should be closed by the client:
 
 ```go
@@ -82,14 +89,28 @@ Creating a consumer:
 
 Consuming messages:
 
-Consumer groups are lazily initialized i.e. establishing connection to Kafka is done within `StartListening()`.
+Consumer groups are lazily initialized i.e. establishing connection to Kafka is done within `Start()`.
 
 ```go
     handler := func(message kafka.FTMessage) {
         // Message handling
     }
     
-    go consumer.StartListening(handler) // Blocking until connection is established
+    go consumer.Start(handler) // Blocking until connection is established
+```
+
+The health of the Kafka cluster can be checked by attempting to establish separate connection with the provided configuration:
+
+```go
+   err := consumer.ConnectivityCheck()
+   // Error handling
+```
+
+The health of the consumer process is also being monitored and its status can be accessed:
+
+```go
+   err := consumer.MonitorCheck()
+   // Error handling
 ```
 
 Connections should be closed by the client:

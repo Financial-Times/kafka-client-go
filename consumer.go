@@ -165,8 +165,19 @@ func (c *Consumer) consumeMessages(ctx context.Context, topics []string, handler
 	}
 }
 
-// StartListening is a blocking call that tries to establish a connection to Kafka and then starts listening for messages.
-func (c *Consumer) StartListening(messageHandler func(message FTMessage)) {
+// Start will attempt to establish consumer group and consumer monitor connections until successful.
+// Once those are established, message consumption and consumer monitoring processes are started.
+//
+// Each message will be handled using the provided handler.
+//
+// The consumer monitoring process is using a separate Kafka connection and will:
+//  1. Request the offsets for a topic and the respective claimed partitions on a given time interval from the Kafka broker;
+//  2. Deduce the message lag by subtracting the fetched and previously stored offsets;
+//  2. Store the partition lag if such is present and overwrite the previously stored offsets;
+//  4. Report a status error on MonitorCheck() calls.
+//
+// Close() calls will terminate both the message consumption and the consumer monitoring processes.
+func (c *Consumer) Start(messageHandler func(message FTMessage)) {
 	if !c.isConnected() {
 		c.connect()
 	}
@@ -233,7 +244,7 @@ func (c *Consumer) MonitorCheck() error {
 		return ErrMonitorNotConnected
 	}
 
-	return c.monitor.isHealthy()
+	return c.monitor.consumerStatus()
 }
 
 func newConsumerGroup(config ConsumerConfig) (sarama.ConsumerGroup, error) {

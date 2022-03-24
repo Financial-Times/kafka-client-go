@@ -62,14 +62,14 @@ func NewKafkaConsumer(topic string) *Consumer {
 	return NewConsumer(config, topics, log)
 }
 
-func TestKafkaConsumer_StartListening(t *testing.T) {
+func TestKafkaConsumer_Start(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping test as it requires a connection to Kafka.")
 	}
 
 	consumer := NewKafkaConsumer(testTopic)
 
-	go consumer.StartListening(func(msg FTMessage) {})
+	go consumer.Start(func(msg FTMessage) {})
 	time.Sleep(5 * time.Second)
 
 	require.NoError(t, consumer.ConnectivityCheck())
@@ -201,11 +201,11 @@ func NewMockConsumer() *Consumer {
 	}
 }
 
-func TestConsumer_StartListening(t *testing.T) {
+func TestConsumer_Start(t *testing.T) {
 	var count int32
 	consumer := NewMockConsumer()
 
-	consumer.StartListening(func(msg FTMessage) {
+	consumer.Start(func(msg FTMessage) {
 		atomic.AddInt32(&count, 1)
 	})
 

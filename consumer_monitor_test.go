@@ -392,7 +392,7 @@ func TestConsumerMonitor_Workflow(t *testing.T) {
 
 	go monitor.run(ctx, subscriptions)
 
-	assert.NoError(t, monitor.isHealthy()) // Initial status is healthy.
+	assert.NoError(t, monitor.consumerStatus()) // Initial status is healthy.
 
 	for _, update := range updates {
 		if update.subscription != nil {
@@ -403,6 +403,6 @@ func TestConsumerMonitor_Workflow(t *testing.T) {
 
 		time.Sleep(fetchHandlingInterval) // Wait for the new response to be fetched and handled.
 
-		require.Equal(t, update.statusError, monitor.isHealthy())
+		require.Equal(t, update.statusError, monitor.consumerStatus())
 	}
 }

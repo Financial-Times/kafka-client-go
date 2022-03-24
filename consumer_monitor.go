@@ -234,7 +234,7 @@ func (m *consumerMonitor) clearConsumerStatus() {
 	}
 }
 
-func (m *consumerMonitor) isHealthy() error {
+func (m *consumerMonitor) consumerStatus() error {
 	m.topicsLock.RLock()
 	defer m.topicsLock.RUnlock()
 
