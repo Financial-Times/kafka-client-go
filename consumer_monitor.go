@@ -39,13 +39,13 @@ type consumerMonitor struct {
 }
 
 func newConsumerMonitor(config ConsumerConfig, fetcher offsetFetcher, topics []*Topic, logger *logger.UPPLogger) *consumerMonitor {
-	offsetFetchInterval := 3 * time.Minute
-	if config.OffsetFetchInterval != 0 {
-		offsetFetchInterval = config.OffsetFetchInterval
+	offsetFetchInterval := config.OffsetFetchInterval
+	if offsetFetchInterval <= 0 || offsetFetchInterval > 10*time.Minute {
+		offsetFetchInterval = 3 * time.Minute
 	}
-	maxFailureCount := 5
-	if config.OffsetFetchMaxFailureCount != 0 {
-		maxFailureCount = config.OffsetFetchMaxFailureCount
+	maxFailureCount := config.OffsetFetchMaxFailureCount
+	if maxFailureCount <= 0 || maxFailureCount > 10 {
+		maxFailureCount = 5
 	}
 
 	return &consumerMonitor{

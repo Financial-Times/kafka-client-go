@@ -37,10 +37,12 @@ type ConsumerConfig struct {
 	// Only used for subsequent attempts if the initial one fails.
 	// Default is 1 minute. Maximum is 5 minutes.
 	ConnectionRetryInterval time.Duration
-	// Time interval between each offset fetching request. Default is 3 minutes.
+	// Time interval between each offset fetching request.
+	// Default is 3 minutes. Maximum is 10 minutes.
 	OffsetFetchInterval time.Duration
 	// Total count of offset fetching request failures until consumer status is marked as unknown.
-	// Default is 5. Note: A single failure will result in follow-up requests to be sent on
+	// Default is 5. Maximum is 10.
+	// Note: A single failure will result in follow-up requests to be sent on
 	// shorter interval than the value of OffsetFetchInterval until successful.
 	OffsetFetchMaxFailureCount int
 	Options                    *sarama.Config
