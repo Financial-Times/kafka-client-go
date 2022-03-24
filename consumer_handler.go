@@ -4,14 +4,12 @@ import "github.com/Shopify/sarama"
 
 // consumerHandler represents a Sarama consumer group consumer.
 type consumerHandler struct {
-	ready         chan struct{}
 	subscriptions chan *subscriptionEvent
 	handler       func(message FTMessage)
 }
 
 func newConsumerHandler(subscriptions chan *subscriptionEvent, handler func(message FTMessage)) *consumerHandler {
 	return &consumerHandler{
-		ready:         make(chan struct{}),
 		subscriptions: subscriptions,
 		handler:       handler,
 	}
@@ -19,7 +17,6 @@ func newConsumerHandler(subscriptions chan *subscriptionEvent, handler func(mess
 
 // Setup is run at the beginning of a new session, before ConsumeClaim.
 func (c *consumerHandler) Setup(sarama.ConsumerGroupSession) error {
-	c.ready <- struct{}{}
 	return nil
 }
 

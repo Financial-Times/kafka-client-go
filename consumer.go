@@ -135,12 +135,7 @@ func (c *Consumer) isMonitorConnected() bool {
 	return c.monitor != nil
 }
 
-// StartListening is a blocking call that tries to establish a connection to Kafka and then starts listening for messages.
-func (c *Consumer) StartListening(messageHandler func(message FTMessage)) {
-	if !c.isConnected() {
-		c.connect()
-	}
-
+func (c *Consumer) consumeMessages(ctx context.Context, topics []string, handler *consumerHandler) {
 	log := c.logger.WithField("process", "Consumer")
 
 	go func() {
@@ -148,6 +143,26 @@ func (c *Consumer) StartListening(messageHandler func(message FTMessage)) {
 			log.WithError(err).Error("Error consuming message")
 		}
 	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("Terminating consumer...")
+			return
+
+		default:
+			if err := c.consumerGroup.Consume(ctx, topics, handler); err != nil {
+				log.WithError(err).Error("Error occurred during consumer group lifecycle")
+			}
+		}
+	}
+}
+
+// StartListening is a blocking call that tries to establish a connection to Kafka and then starts listening for messages.
+func (c *Consumer) StartListening(messageHandler func(message FTMessage)) {
+	if !c.isConnected() {
+		c.connect()
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	subscriptions := make(chan *subscriptionEvent, 50)
@@ -159,37 +174,18 @@ func (c *Consumer) StartListening(messageHandler func(message FTMessage)) {
 		topics = append(topics, topic.Name)
 	}
 
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				log.Info("Terminating consumer...")
-				return
-
-			default:
-				if err := c.consumerGroup.Consume(ctx, topics, handler); err != nil {
-					log.WithError(err).Error("Error occurred during consumer group lifecycle")
-				}
-			}
-		}
-	}()
-
+	go c.consumeMessages(ctx, topics, handler)
 	go c.monitor.run(ctx, subscriptions)
 
 	go func() {
-		for {
-			select {
-			case <-handler.ready:
-				log.Debug("New consumer group session starting...")
-			case <-c.closed:
-				// Terminate the message consumption.
-				cancel()
-				return
-			}
-		}
+		<-c.closed
+
+		// Terminate the message consumption and consumer monitoring.
+		cancel()
+		return
 	}()
 
-	log.Info("Starting consumer...")
+	c.logger.Info("Starting consumer...")
 }
 
 // Close closes the consumer connection to Kafka if the consumer is connected.
