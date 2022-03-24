@@ -13,8 +13,8 @@ import (
 )
 
 var (
-	errConsumerNotConnected = fmt.Errorf("consumer is not connected to Kafka")
-	errMonitorNotConnected  = fmt.Errorf("consumer monitor is not connected to Kafka")
+	ErrConsumerNotConnected = fmt.Errorf("consumer is not connected to Kafka")
+	ErrMonitorNotConnected  = fmt.Errorf("consumer monitor is not connected to Kafka")
 )
 
 // Consumer which will keep trying to reconnect to Kafka on a specified interval.
@@ -206,7 +206,7 @@ func (c *Consumer) Close() error {
 // ConnectivityCheck checks whether a connection to Kafka can be established.
 func (c *Consumer) ConnectivityCheck() error {
 	if !c.isConnected() {
-		return errConsumerNotConnected
+		return ErrConsumerNotConnected
 	}
 
 	config := ConsumerConfig{
@@ -227,7 +227,7 @@ func (c *Consumer) ConnectivityCheck() error {
 // MonitorCheck checks whether the consumer group is lagging behind when reading messages.
 func (c *Consumer) MonitorCheck() error {
 	if !c.isMonitorConnected() {
-		return errMonitorNotConnected
+		return ErrMonitorNotConnected
 	}
 
 	return c.monitor.isHealthy()

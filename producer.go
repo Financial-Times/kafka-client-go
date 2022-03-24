@@ -10,7 +10,7 @@ import (
 	"github.com/Shopify/sarama"
 )
 
-const errProducerNotConnected = "producer is not connected to Kafka"
+var ErrProducerNotConnected = fmt.Errorf("producer is not connected to Kafka")
 
 // Producer which will keep trying to reconnect to Kafka on a specified interval.
 // The underlying producer is created in a separate go-routine when the Producer is initialized.
@@ -84,7 +84,7 @@ func (p *Producer) isConnected() bool {
 // SendMessage checks if the producer is connected, then sends a message to Kafka.
 func (p *Producer) SendMessage(message FTMessage) error {
 	if !p.isConnected() {
-		return fmt.Errorf(errProducerNotConnected)
+		return ErrProducerNotConnected
 	}
 
 	_, _, err := p.producer.SendMessage(&sarama.ProducerMessage{
@@ -107,7 +107,7 @@ func (p *Producer) Close() error {
 // ConnectivityCheck checks whether a connection to Kafka can be established.
 func (p *Producer) ConnectivityCheck() error {
 	if !p.isConnected() {
-		return fmt.Errorf(errProducerNotConnected)
+		return ErrProducerNotConnected
 	}
 
 	producer, err := newProducer(p.config)

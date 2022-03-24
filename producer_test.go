@@ -59,7 +59,7 @@ func TestProducer_SendMessage_NoConnection(t *testing.T) {
 	}
 
 	err := producer.SendMessage(msg)
-	assert.EqualError(t, err, errProducerNotConnected)
+	assert.ErrorIs(t, err, ErrProducerNotConnected)
 }
 
 func TestProducer_InvalidConnection(t *testing.T) {
