@@ -24,43 +24,46 @@ type Producer struct {
 type ProducerConfig struct {
 	BrokersConnectionString string
 	Topic                   string
+	// Time interval between each connection attempt.
+	// Only used for subsequent attempts if the initial one fails.
+	// Default is 1 minute. Maximum is 5 minutes.
+	ConnectionRetryInterval time.Duration
 	Options                 *sarama.Config
 }
 
-func NewProducer(config ProducerConfig, logger *logger.UPPLogger, initialDelay, retryInterval time.Duration) *Producer {
+func NewProducer(config ProducerConfig, logger *logger.UPPLogger) *Producer {
 	producer := &Producer{
 		config:       config,
 		producerLock: &sync.RWMutex{},
 		logger:       logger,
 	}
 
-	go func() {
-		if initialDelay > 0 {
-			time.Sleep(initialDelay)
-		}
-
-		producer.connect(retryInterval)
-	}()
+	go producer.connect()
 
 	return producer
 }
 
 // connect tries to establish a connection to Kafka and will retry endlessly.
-func (p *Producer) connect(retryInterval time.Duration) {
-	connectorLog := p.logger.
+func (p *Producer) connect() {
+	log := p.logger.
 		WithField("brokers", p.config.BrokersConnectionString).
 		WithField("topic", p.config.Topic)
+
+	connectionRetryInterval := p.config.ConnectionRetryInterval
+	if connectionRetryInterval <= 0 || connectionRetryInterval > 5*time.Minute {
+		connectionRetryInterval = time.Minute
+	}
 
 	for {
 		producer, err := newProducer(p.config)
 		if err == nil {
-			connectorLog.Info("Connected to Kafka producer")
+			log.Info("Connected to Kafka producer")
 			p.setProducer(producer)
 			break
 		}
 
-		connectorLog.WithError(err).Warn("Error creating Kafka producer")
-		time.Sleep(retryInterval)
+		log.WithError(err).Warn("Error creating Kafka producer")
+		time.Sleep(connectionRetryInterval)
 	}
 }
 

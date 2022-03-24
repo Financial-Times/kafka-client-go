@@ -30,15 +30,13 @@ Creating a producer:
 ```go
     config := kafka.ProducerConfig{
         BrokersConnectionString: "", // Comma-separated list of Kafka brokers
-        Topic:                   "", // Topic to publish to
+        Topic:                   "", // Topic to publish to 
+        ConnectionRetryInterval: 0,  // Duration between each retry for establishing connection
     }
-
-    initialDelay := time.Second // Duration to await before trying to establish connection
-    retryInterval := time.Second // Duration between each retry for establishing connection
 
     logger := logger.NewUPPLogger(...)
     
-    producer := kafka.NewProducer(config, logger, initialDelay, retryInterval)
+    producer := kafka.NewProducer(config, logger)
 ```
 
 The connection to Kafka is started in a separate go routine when creating the producer.
@@ -69,18 +67,17 @@ Creating a consumer:
     config := kafka.ConsumerConfig{
         BrokersConnectionString: "", // Comma-separated list of Kafka brokers
         ConsumerGroup:           "", // Unique name of a consumer group
-    }
+        ConnectionRetryInterval: 0,  // Duration between each retry for establishing connection
+}
 
     topics := []*kafka.Topic{
         kafka.NewTopic(""),                             // Topic to consume from
         kafka.NewTopic("", kafka.WithLagTolerance(50)), // Topic to consume from with custom lag tolerance used for monitoring
     }
-    
-    retryInterval := time.Second // Duration between each retry for establishing connection
-    
+	
     logger := logger.NewUPPLogger(...)
 
-    consumer := kafka.NewConsumer(config, topics, logger, retryInterval)
+    consumer := kafka.NewConsumer(config, topics, logger)
 ```
 
 Consuming messages:

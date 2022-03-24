@@ -20,20 +20,23 @@ var (
 // Consumer which will keep trying to reconnect to Kafka on a specified interval.
 // The underlying consumer group is created lazily when message listening is started.
 type Consumer struct {
-	config                  ConsumerConfig
-	topics                  []*Topic
-	consumerGroupLock       *sync.RWMutex
-	consumerGroup           sarama.ConsumerGroup
-	monitorLock             *sync.RWMutex
-	monitor                 *consumerMonitor
-	connectionRetryInterval time.Duration
-	logger                  *logger.UPPLogger
-	closed                  chan struct{}
+	config            ConsumerConfig
+	topics            []*Topic
+	consumerGroupLock *sync.RWMutex
+	consumerGroup     sarama.ConsumerGroup
+	monitorLock       *sync.RWMutex
+	monitor           *consumerMonitor
+	logger            *logger.UPPLogger
+	closed            chan struct{}
 }
 
 type ConsumerConfig struct {
 	BrokersConnectionString string
 	ConsumerGroup           string
+	// Time interval between each connection attempt.
+	// Only used for subsequent attempts if the initial one fails.
+	// Default is 1 minute. Maximum is 5 minutes.
+	ConnectionRetryInterval time.Duration
 	// Time interval between each offset fetching request. Default is 3 minutes.
 	OffsetFetchInterval time.Duration
 	// Total count of offset fetching request failures until consumer status is marked as unknown.
@@ -43,15 +46,14 @@ type ConsumerConfig struct {
 	Options                    *sarama.Config
 }
 
-func NewConsumer(config ConsumerConfig, topics []*Topic, log *logger.UPPLogger, connectionRetryInterval time.Duration) *Consumer {
+func NewConsumer(config ConsumerConfig, topics []*Topic, log *logger.UPPLogger) *Consumer {
 	consumer := &Consumer{
-		config:                  config,
-		topics:                  topics,
-		consumerGroupLock:       &sync.RWMutex{},
-		monitorLock:             &sync.RWMutex{},
-		connectionRetryInterval: connectionRetryInterval,
-		logger:                  log,
-		closed:                  make(chan struct{}),
+		config:            config,
+		topics:            topics,
+		consumerGroupLock: &sync.RWMutex{},
+		monitorLock:       &sync.RWMutex{},
+		logger:            log,
+		closed:            make(chan struct{}),
 	}
 
 	return consumer
@@ -63,6 +65,11 @@ func (c *Consumer) connect() {
 		WithField("brokers", c.config.BrokersConnectionString).
 		WithField("topics", c.topics).
 		WithField("consumer_group", c.config.ConsumerGroup)
+
+	connectionRetryInterval := c.config.ConnectionRetryInterval
+	if connectionRetryInterval <= 0 || connectionRetryInterval > 5*time.Minute {
+		connectionRetryInterval = time.Minute
+	}
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -79,7 +86,7 @@ func (c *Consumer) connect() {
 			}
 
 			log.WithError(err).Warn("Error creating Kafka consumer group")
-			time.Sleep(c.connectionRetryInterval)
+			time.Sleep(connectionRetryInterval)
 		}
 	}()
 
@@ -96,7 +103,7 @@ func (c *Consumer) connect() {
 			}
 
 			log.WithError(err).Warn("Error creating Kafka offset fetcher")
-			time.Sleep(c.connectionRetryInterval)
+			time.Sleep(connectionRetryInterval)
 		}
 	}()
 

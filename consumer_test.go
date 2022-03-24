@@ -54,11 +54,12 @@ func NewKafkaConsumer(topic string) *Consumer {
 	config := ConsumerConfig{
 		BrokersConnectionString: testBrokers,
 		ConsumerGroup:           testConsumerGroup,
+		ConnectionRetryInterval: time.Second,
 		Options:                 DefaultConsumerOptions(),
 	}
 	topics := []*Topic{NewTopic(topic)}
 
-	return NewConsumer(config, topics, log, time.Second)
+	return NewConsumer(config, topics, log)
 }
 
 func TestKafkaConsumer_StartListening(t *testing.T) {
