@@ -12,10 +12,22 @@ import (
 	"github.com/Shopify/sarama"
 )
 
-type offsetFetcher interface {
+type topicOffsetFetcher interface {
+	GetOffset(topic string, partitionID int32, position int64) (int64, error)
+}
+
+type consumerOffsetFetcher interface {
 	ListConsumerGroupOffsets(group string, topicPartitions map[string][]int32) (*sarama.OffsetFetchResponse, error)
 
 	Close() error
+}
+
+type offset struct {
+	Partition int32
+	// Last committed offset of the consumer group.
+	Consumer int64
+	// Next offset to be produced in the topic.
+	Topic int64
 }
 
 type fetcherScheduler struct {
@@ -27,18 +39,19 @@ type fetcherScheduler struct {
 }
 
 type consumerMonitor struct {
-	consumerGroup string
-	offsetFetcher offsetFetcher
-	scheduler     fetcherScheduler
-	// Key1 is Topic. Key2 is Partition. Value is Offset.
-	subscriptions map[string]map[int32]int64
+	consumerGroup         string
+	consumerOffsetFetcher consumerOffsetFetcher
+	topicOffsetFetcher    topicOffsetFetcher
+	scheduler             fetcherScheduler
+	// Key is Topic. Values are Partitions.
+	subscriptions map[string][]int32
 	topicsLock    *sync.RWMutex
 	topics        []*Topic
 	unknownStatus bool
 	logger        *logger.UPPLogger
 }
 
-func newConsumerMonitor(config ConsumerConfig, fetcher offsetFetcher, topics []*Topic, logger *logger.UPPLogger) *consumerMonitor {
+func newConsumerMonitor(config ConsumerConfig, consumerFetcher consumerOffsetFetcher, topicFetcher topicOffsetFetcher, topics []*Topic, logger *logger.UPPLogger) *consumerMonitor {
 	offsetFetchInterval := config.OffsetFetchInterval
 	if offsetFetchInterval <= 0 || offsetFetchInterval > 10*time.Minute {
 		offsetFetchInterval = 3 * time.Minute
@@ -55,11 +68,12 @@ func newConsumerMonitor(config ConsumerConfig, fetcher offsetFetcher, topics []*
 			shortenedInterval: offsetFetchInterval / 3,
 			maxFailureCount:   maxFailureCount,
 		},
-		offsetFetcher: fetcher,
-		subscriptions: map[string]map[int32]int64{},
-		topicsLock:    &sync.RWMutex{},
-		topics:        topics,
-		logger:        logger,
+		consumerOffsetFetcher: consumerFetcher,
+		topicOffsetFetcher:    topicFetcher,
+		subscriptions:         map[string][]int32{},
+		topicsLock:            &sync.RWMutex{},
+		topics:                topics,
+		logger:                logger,
 	}
 }
 
@@ -72,9 +86,10 @@ func (m *consumerMonitor) run(ctx context.Context, subscriptionEvents chan *subs
 	for {
 		select {
 		case <-ctx.Done():
-			// Terminate the fetcher and exit.
-			if err := m.offsetFetcher.Close(); err != nil {
-				log.WithError(err).Error("Failed to close offset fetcher connection")
+			// Terminate the fetchers and exit.
+			// Note that both fetchers share the same connection so calling Close() once is enough.
+			if err := m.consumerOffsetFetcher.Close(); err != nil {
+				log.WithError(err).Error("Failed to close offset fetcher connections")
 			}
 
 			log.Info("Terminating consumer monitor...")
@@ -90,13 +105,12 @@ func (m *consumerMonitor) run(ctx context.Context, subscriptionEvents chan *subs
 			m.updateSubscriptions(event)
 
 		case <-m.scheduler.ticker.C:
-			subscriptions := m.currentSubscriptions()
-			if len(subscriptions) == 0 {
+			if len(m.subscriptions) == 0 {
 				log.Warn("Consumer is not currently subscribed for any topics")
 				continue
 			}
 
-			offsets, err := m.fetchOffsets(subscriptions)
+			offsets, err := m.fetchOffsets()
 			if err != nil {
 				log.WithError(err).Error("Failed to fetch consumer offsets")
 
@@ -126,37 +140,35 @@ func (m *consumerMonitor) run(ctx context.Context, subscriptionEvents chan *subs
 }
 
 func (m *consumerMonitor) updateSubscriptions(event *subscriptionEvent) {
-	subscriptions, ok := m.subscriptions[event.topic]
-	if !ok {
-		subscriptions = map[int32]int64{}
-		m.subscriptions[event.topic] = subscriptions
-	}
-
 	if event.subscribed {
-		subscriptions[event.partition] = 0
+		m.subscriptions[event.topic] = append(m.subscriptions[event.topic], event.partition)
 		return
 	}
 
-	delete(subscriptions, event.partition)
-	if len(subscriptions) == 0 {
-		delete(m.subscriptions, event.topic)
+	partitions, ok := m.subscriptions[event.topic]
+	if !ok {
+		return
 	}
-}
 
-func (m *consumerMonitor) currentSubscriptions() map[string][]int32 {
-	subscriptions := map[string][]int32{}
-
-	for topic, partitions := range m.subscriptions {
-		for partition := range partitions {
-			subscriptions[topic] = append(subscriptions[topic], partition)
+	for i, p := range partitions {
+		if p == event.partition {
+			partitions = append(partitions[:i], partitions[i+1:]...)
+			break
 		}
 	}
 
-	return subscriptions
+	if len(partitions) == 0 {
+		delete(m.subscriptions, event.topic)
+		return
+	}
+
+	m.subscriptions[event.topic] = partitions
 }
 
-func (m *consumerMonitor) fetchOffsets(subscriptions map[string][]int32) (map[string]map[int32]int64, error) {
-	fetchedOffsets, err := m.offsetFetcher.ListConsumerGroupOffsets(m.consumerGroup, subscriptions)
+// Fetch and return the latest committed offsets by the consumer group
+// as well as those at the end of the log for the respective topics.
+func (m *consumerMonitor) fetchOffsets() (map[string][]offset, error) {
+	fetchedOffsets, err := m.consumerOffsetFetcher.ListConsumerGroupOffsets(m.consumerGroup, m.subscriptions)
 	if err != nil {
 		return nil, fmt.Errorf("error fetching consumer group offsets from client: %w", err)
 	}
@@ -165,59 +177,61 @@ func (m *consumerMonitor) fetchOffsets(subscriptions map[string][]int32) (map[st
 		return nil, fmt.Errorf("error fetching consumer group offsets from server: %w", fetchedOffsets.Err)
 	}
 
-	offsets := map[string]map[int32]int64{}
-	for topic := range subscriptions {
+	topicOffsets := map[string][]offset{}
+	for topic := range m.subscriptions {
 		partitions, ok := fetchedOffsets.Blocks[topic]
 		if !ok {
-			return nil, fmt.Errorf("requested offsets for topic %q were not fetched", topic)
+			return nil, fmt.Errorf("requested consumer offsets for topic %q were not fetched", topic)
 		}
 
-		offsets[topic] = map[int32]int64{}
+		var offsets []offset
 		for partition, block := range partitions {
 			if block.Err != sarama.ErrNoError {
 				return nil, fmt.Errorf("error fetching consumer group offsets for partition %d of topic %q from server: %w",
 					partition, topic, block.Err)
 			}
 
-			offsets[topic][partition] = block.Offset
+			topicOffset, err := m.topicOffsetFetcher.GetOffset(topic, partition, sarama.OffsetNewest)
+			if err != nil {
+				return nil, fmt.Errorf("error fetching topic offset for partition %d of topic %q: %w",
+					partition, topic, err)
+			}
+
+			offsets = append(offsets, offset{
+				Partition: partition,
+				Consumer:  block.Offset,
+				Topic:     topicOffset,
+			})
 		}
+
+		topicOffsets[topic] = offsets
 	}
 
-	return offsets, nil
+	return topicOffsets, nil
 }
 
-func (m *consumerMonitor) updateConsumerStatus(fetchedOffsets map[string]map[int32]int64) {
+func (m *consumerMonitor) updateConsumerStatus(fetchedOffsets map[string][]offset) {
 	m.topicsLock.Lock()
 	defer m.topicsLock.Unlock()
 
 	for _, topic := range m.topics {
-		subscriptions, ok := m.subscriptions[topic.Name]
+		offsets, ok := fetchedOffsets[topic.Name]
 		if !ok {
 			// No active subscriptions for the given topic at the time.
 			topic.partitionLag = map[int32]int64{}
 			continue
 		}
 
-		fetchedOffsets, ok := fetchedOffsets[topic.Name]
-		if !ok {
-			topic.offsetsNotFetched = true
-			continue
-		}
-
-		for partition, storedOffset := range subscriptions {
-			fetchedOffset := fetchedOffsets[partition]
-
-			// Only store the lag if it exceeds the configured threshold.
-			lag := fetchedOffset - storedOffset
-			if lag > topic.lagTolerance && storedOffset != 0 {
-				topic.partitionLag[partition] = lag
+		for _, offset := range offsets {
+			// Only store the lag if it exceeds the configured threshold or is invalid.
+			// The next offset in the topic will always be greater than or equal to the last committed offset of the consumer.
+			lag := offset.Topic - offset.Consumer
+			if lag > topic.lagTolerance || lag < 0 {
+				topic.partitionLag[offset.Partition] = lag
 			} else {
 				// Clear the latest lag entry to flag the partition as healthy.
-				delete(topic.partitionLag, partition)
+				delete(topic.partitionLag, offset.Partition)
 			}
-
-			// Replace the stored offset with the latest fetched one.
-			subscriptions[partition] = fetchedOffset
 		}
 	}
 
@@ -245,14 +259,14 @@ func (m *consumerMonitor) consumerStatus() error {
 	var statusMessages []string
 
 	for _, topic := range m.topics {
-		if topic.offsetsNotFetched {
-			statusMessages = append(statusMessages, fmt.Sprintf("offsets for topic %q could not be fetched", topic.Name))
-			continue
-		}
-
 		for partition, lag := range topic.partitionLag {
-			message := fmt.Sprintf("consumer is lagging behind for partition %d of topic %q with %d messages",
-				partition, topic.Name, lag)
+			var message string
+			if lag < 0 {
+				message = fmt.Sprintf("could not determine lag for partition %d of topic %q", partition, topic.Name)
+			} else {
+				message = fmt.Sprintf("consumer is lagging behind for partition %d of topic %q with %d messages", partition, topic.Name, lag)
+			}
+
 			statusMessages = append(statusMessages, message)
 		}
 	}

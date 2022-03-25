@@ -3,6 +3,7 @@ package kafka
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -12,20 +13,43 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type offsetFetcherMock struct {
+const (
+	monitorTopic1 = "testTopic"
+	monitorTopic2 = "testTopic2"
+
+	monitorTopic1LagTolerance = 20
+	monitorTopic2LagTolerance = 50
+
+	monitorPartition1 = 1
+	monitorPartition2 = 2
+)
+
+type topicOffsetFetcherMock struct {
+	getOffsetF func(topic string, partitionID int32, position int64) (int64, error)
+}
+
+func (f *topicOffsetFetcherMock) GetOffset(topic string, partitionID int32, position int64) (int64, error) {
+	if f.getOffsetF != nil {
+		return f.getOffsetF(topic, partitionID, position)
+	}
+
+	panic("topicOffsetFetcherMock.GetOffset is not implemented")
+}
+
+type consumerOffsetFetcherMock struct {
 	listConsumerGroupOffsetsF func(group string, topicPartitions map[string][]int32) (*sarama.OffsetFetchResponse, error)
 	closeF                    func() error
 }
 
-func (f *offsetFetcherMock) ListConsumerGroupOffsets(group string, topicPartitions map[string][]int32) (*sarama.OffsetFetchResponse, error) {
+func (f *consumerOffsetFetcherMock) ListConsumerGroupOffsets(group string, topicPartitions map[string][]int32) (*sarama.OffsetFetchResponse, error) {
 	if f.listConsumerGroupOffsetsF != nil {
 		return f.listConsumerGroupOffsetsF(group, topicPartitions)
 	}
 
-	panic("offsetFetcherMock.ListConsumerGroupOffsets is not implemented")
+	panic("consumerOffsetFetcherMock.ListConsumerGroupOffsets is not implemented")
 }
 
-func (f *offsetFetcherMock) Close() error {
+func (f *consumerOffsetFetcherMock) Close() error {
 	if f.closeF != nil {
 		return f.closeF()
 	}
@@ -34,9 +58,10 @@ func (f *offsetFetcherMock) Close() error {
 }
 
 func TestConsumerMonitor_Lifecycle(t *testing.T) {
-	offsetFetcher := &offsetFetcherMock{}
+	topicOffsetFetcher := &topicOffsetFetcherMock{}
+	consumerOffsetFetcher := &consumerOffsetFetcherMock{}
 	log := logger.NewUPPLogger("test", "PANIC")
-	monitor := newConsumerMonitor(ConsumerConfig{}, offsetFetcher, nil, log)
+	monitor := newConsumerMonitor(ConsumerConfig{}, consumerOffsetFetcher, topicOffsetFetcher, nil, log)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	subscriptions := make(chan *subscriptionEvent, 10)
@@ -63,14 +88,15 @@ func TestConsumerMonitor_Lifecycle(t *testing.T) {
 func TestConsumerMonitor_FetchOffsets(t *testing.T) {
 	tests := []struct {
 		name               string
-		offsetFetcher      offsetFetcher
+		topicFetcher       topicOffsetFetcher
+		consumerFetcher    consumerOffsetFetcher
 		subscriptionsParam map[string][]int32
-		offsetsResults     map[string]map[int32]int64
+		offsetsResults     map[string][]offset
 		errMessage         string
 	}{
 		{
-			name: "fetching offsets fails with client error",
-			offsetFetcher: &offsetFetcherMock{
+			name: "fetching consumer offsets fails with client error",
+			consumerFetcher: &consumerOffsetFetcherMock{
 				listConsumerGroupOffsetsF: func(string, map[string][]int32) (*sarama.OffsetFetchResponse, error) {
 					return nil, fmt.Errorf("client error")
 				},
@@ -78,8 +104,8 @@ func TestConsumerMonitor_FetchOffsets(t *testing.T) {
 			errMessage: "error fetching consumer group offsets from client: client error",
 		},
 		{
-			name: "fetching offsets fails with server error",
-			offsetFetcher: &offsetFetcherMock{
+			name: "fetching consumer offsets fails with server error",
+			consumerFetcher: &consumerOffsetFetcherMock{
 				listConsumerGroupOffsetsF: func(string, map[string][]int32) (*sarama.OffsetFetchResponse, error) {
 					return &sarama.OffsetFetchResponse{
 						Err: 13,
@@ -89,16 +115,21 @@ func TestConsumerMonitor_FetchOffsets(t *testing.T) {
 			errMessage: "error fetching consumer group offsets from server: kafka server",
 		},
 		{
-			name: "fetching specific offset fails with server error",
-			offsetFetcher: &offsetFetcherMock{
+			name: "fetching specific consumer offset fails with server error",
+			topicFetcher: &topicOffsetFetcherMock{
+				getOffsetF: func(string, int32, int64) (int64, error) {
+					return 0, nil
+				},
+			},
+			consumerFetcher: &consumerOffsetFetcherMock{
 				listConsumerGroupOffsetsF: func(string, map[string][]int32) (*sarama.OffsetFetchResponse, error) {
 					return &sarama.OffsetFetchResponse{
 						Blocks: map[string]map[int32]*sarama.OffsetFetchResponseBlock{
-							"testTopic": {
-								1: &sarama.OffsetFetchResponseBlock{
+							monitorTopic1: {
+								monitorPartition1: &sarama.OffsetFetchResponseBlock{
 									Offset: 500,
 								},
-								2: &sarama.OffsetFetchResponseBlock{
+								monitorPartition2: &sarama.OffsetFetchResponseBlock{
 									Err: 3,
 								},
 							},
@@ -107,18 +138,18 @@ func TestConsumerMonitor_FetchOffsets(t *testing.T) {
 				},
 			},
 			subscriptionsParam: map[string][]int32{
-				"testTopic": {1, 2},
+				monitorTopic1: {monitorPartition1, monitorPartition2},
 			},
 			errMessage: "error fetching consumer group offsets for partition 2 of topic \"testTopic\" from server: kafka server",
 		},
 		{
-			name: "fetching offsets fails due to unexpected response",
-			offsetFetcher: &offsetFetcherMock{
+			name: "fetching consumer offsets fails due to unexpected response",
+			consumerFetcher: &consumerOffsetFetcherMock{
 				listConsumerGroupOffsetsF: func(string, map[string][]int32) (*sarama.OffsetFetchResponse, error) {
 					return &sarama.OffsetFetchResponse{
 						Blocks: map[string]map[int32]*sarama.OffsetFetchResponseBlock{
-							"testTopic": {
-								1: &sarama.OffsetFetchResponseBlock{
+							monitorTopic1: {
+								monitorPartition1: &sarama.OffsetFetchResponseBlock{
 									Offset: 500,
 								},
 							},
@@ -127,27 +158,57 @@ func TestConsumerMonitor_FetchOffsets(t *testing.T) {
 				},
 			},
 			subscriptionsParam: map[string][]int32{
-				"testTopic2": {3},
+				monitorTopic2: {3},
 			},
-			errMessage: "requested offsets for topic \"testTopic2\" were not fetched",
+			errMessage: "requested consumer offsets for topic \"testTopic2\" were not fetched",
+		},
+		{
+			name: "fetching topic offset fails",
+			topicFetcher: &topicOffsetFetcherMock{
+				getOffsetF: func(string, int32, int64) (int64, error) {
+					return 0, fmt.Errorf("client error")
+				},
+			},
+			consumerFetcher: &consumerOffsetFetcherMock{
+				listConsumerGroupOffsetsF: func(string, map[string][]int32) (*sarama.OffsetFetchResponse, error) {
+					return &sarama.OffsetFetchResponse{
+						Blocks: map[string]map[int32]*sarama.OffsetFetchResponseBlock{
+							monitorTopic2: {
+								monitorPartition2: &sarama.OffsetFetchResponseBlock{
+									Offset: 333,
+								},
+							},
+						},
+					}, nil
+				},
+			},
+			subscriptionsParam: map[string][]int32{
+				monitorTopic2: {monitorPartition2},
+			},
+			errMessage: "error fetching topic offset for partition 2 of topic \"testTopic2\": client error",
 		},
 		{
 			name: "fetching offsets is successful",
-			offsetFetcher: &offsetFetcherMock{
+			topicFetcher: &topicOffsetFetcherMock{
+				getOffsetF: func(string, int32, int64) (int64, error) {
+					return 750, nil
+				},
+			},
+			consumerFetcher: &consumerOffsetFetcherMock{
 				listConsumerGroupOffsetsF: func(string, map[string][]int32) (*sarama.OffsetFetchResponse, error) {
 					return &sarama.OffsetFetchResponse{
 						Blocks: map[string]map[int32]*sarama.OffsetFetchResponseBlock{
-							"testTopic": {
-								1: &sarama.OffsetFetchResponseBlock{
+							monitorTopic1: {
+								monitorPartition1: &sarama.OffsetFetchResponseBlock{
 									Offset: 500,
 								},
-								2: &sarama.OffsetFetchResponseBlock{
+								monitorPartition2: &sarama.OffsetFetchResponseBlock{
 									Offset: 600,
 								},
 							},
-							"testTopic2": {
-								32: &sarama.OffsetFetchResponseBlock{
-									Offset: 1500,
+							monitorTopic2: {
+								monitorPartition2: &sarama.OffsetFetchResponseBlock{
+									Offset: 150,
 								},
 							},
 						},
@@ -155,16 +216,28 @@ func TestConsumerMonitor_FetchOffsets(t *testing.T) {
 				},
 			},
 			subscriptionsParam: map[string][]int32{
-				"testTopic":  {1, 2},
-				"testTopic2": {32},
+				monitorTopic1: {monitorPartition1, monitorPartition2},
+				monitorTopic2: {monitorPartition2},
 			},
-			offsetsResults: map[string]map[int32]int64{
-				"testTopic": {
-					1: 500,
-					2: 600,
+			offsetsResults: map[string][]offset{
+				monitorTopic1: {
+					{
+						Partition: monitorPartition1,
+						Consumer:  500,
+						Topic:     750,
+					},
+					{
+						Partition: monitorPartition2,
+						Consumer:  600,
+						Topic:     750,
+					},
 				},
-				"testTopic2": {
-					32: 1500,
+				monitorTopic2: {
+					{
+						Partition: monitorPartition2,
+						Consumer:  150,
+						Topic:     750,
+					},
 				},
 			},
 		},
@@ -177,12 +250,13 @@ func TestConsumerMonitor_FetchOffsets(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			defer func() {
-				assert.NoError(t, test.offsetFetcher.Close())
+				assert.NoError(t, test.consumerFetcher.Close())
 			}()
 
-			monitor := newConsumerMonitor(config, test.offsetFetcher, nil, nil)
+			monitor := newConsumerMonitor(config, test.consumerFetcher, test.topicFetcher, nil, nil)
+			monitor.subscriptions = test.subscriptionsParam
 
-			offsets, err := monitor.fetchOffsets(test.subscriptionsParam)
+			offsets, err := monitor.fetchOffsets()
 			if test.errMessage != "" {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), test.errMessage)
@@ -190,7 +264,7 @@ func TestConsumerMonitor_FetchOffsets(t *testing.T) {
 			}
 
 			require.NoError(t, err)
-			assert.Equal(t, test.offsetsResults, offsets)
+			assert.True(t, reflect.DeepEqual(test.offsetsResults, offsets))
 		})
 	}
 }
@@ -207,7 +281,11 @@ func newMockBrokerWrapper(t *testing.T) *mockBrokerWrapper {
 	handlers := map[string]sarama.MockResponse{
 		"MetadataRequest": sarama.NewMockMetadataResponse(t).
 			SetController(brokerId).
-			SetBroker(broker.Addr(), brokerId),
+			SetBroker(broker.Addr(), brokerId).
+			SetLeader(monitorTopic1, monitorPartition1, brokerId).
+			SetLeader(monitorTopic1, monitorPartition2, brokerId).
+			SetLeader(monitorTopic2, monitorPartition1, brokerId).
+			SetLeader(monitorTopic2, monitorPartition2, brokerId),
 		"FindCoordinatorRequest": sarama.NewMockFindCoordinatorResponse(t).
 			SetCoordinator(sarama.CoordinatorGroup, testConsumerGroup, broker),
 	}
@@ -219,8 +297,11 @@ func newMockBrokerWrapper(t *testing.T) *mockBrokerWrapper {
 	}
 }
 
-func (w *mockBrokerWrapper) setOffsetFetchResponse(offsetResponse *sarama.MockOffsetFetchResponse) {
-	w.handlers["OffsetFetchRequest"] = offsetResponse
+func (w *mockBrokerWrapper) setOffsetFetchResponses(consumerOffsetResponse *sarama.MockOffsetFetchResponse, topicOffsetResponse *sarama.MockOffsetResponse) {
+	w.handlers["OffsetFetchRequest"] = consumerOffsetResponse
+	if topicOffsetResponse != nil {
+		w.handlers["OffsetRequest"] = topicOffsetResponse.SetVersion(1)
+	}
 	w.broker.SetHandlerByMap(w.handlers)
 }
 
@@ -235,155 +316,193 @@ func TestConsumerMonitor_Workflow(t *testing.T) {
 	}
 
 	updates := []struct {
-		subscription   *subscriptionEvent
-		offsetResponse *sarama.MockOffsetFetchResponse
-		statusError    error
+		subscription           *subscriptionEvent
+		consumerOffsetResponse *sarama.MockOffsetFetchResponse
+		topicOffsetResponse    *sarama.MockOffsetResponse
+		statusError            error
 	}{
 		{
 			subscription: &subscriptionEvent{
 				subscribed: true,
-				topic:      "testTopic",
-				partition:  2,
+				topic:      monitorTopic1,
+				partition:  monitorPartition2,
 			},
-			offsetResponse: sarama.NewMockOffsetFetchResponse(t).
-				SetOffset(testConsumerGroup, "testTopic", 2, 15, "", 0),
+			consumerOffsetResponse: sarama.NewMockOffsetFetchResponse(t).
+				SetOffset(testConsumerGroup, monitorTopic1, monitorPartition2, 15, "", 0),
+			topicOffsetResponse: sarama.NewMockOffsetResponse(t).
+				SetOffset(monitorTopic1, monitorPartition2, sarama.OffsetNewest, 20),
 			statusError: nil,
 		},
 		{
-			offsetResponse: sarama.NewMockOffsetFetchResponse(t).
-				SetOffset(testConsumerGroup, "testTopic", 2, 50, "", 0),
+			consumerOffsetResponse: sarama.NewMockOffsetFetchResponse(t).
+				SetOffset(testConsumerGroup, monitorTopic1, monitorPartition2, 50, "", 0),
+			topicOffsetResponse: sarama.NewMockOffsetResponse(t).
+				SetOffset(monitorTopic1, monitorPartition2, sarama.OffsetNewest, 85),
 			statusError: fmt.Errorf("consumer is not healthy: " +
 				"consumer is lagging behind for partition 2 of topic \"testTopic\" with 35 messages"),
 		},
 		{
-			offsetResponse: sarama.NewMockOffsetFetchResponse(t).
-				SetOffset(testConsumerGroup, "testTopic", 2, 78, "", 0),
-			statusError: fmt.Errorf("consumer is not healthy: " +
-				"consumer is lagging behind for partition 2 of topic \"testTopic\" with 28 messages"),
-		},
-		{
-			offsetResponse: sarama.NewMockOffsetFetchResponse(t).
-				SetOffset(testConsumerGroup, "testTopic", 2, 102, "", 0),
-			statusError: fmt.Errorf("consumer is not healthy: " +
-				"consumer is lagging behind for partition 2 of topic \"testTopic\" with 24 messages"),
-		},
-		{
-			offsetResponse: sarama.NewMockOffsetFetchResponse(t).
-				SetOffset(testConsumerGroup, "testTopic", 2, 112, "", 0),
+			consumerOffsetResponse: sarama.NewMockOffsetFetchResponse(t).
+				SetOffset(testConsumerGroup, monitorTopic1, monitorPartition2, 90, "", 0),
+			topicOffsetResponse: sarama.NewMockOffsetResponse(t).
+				SetOffset(monitorTopic1, monitorPartition2, sarama.OffsetNewest, 95),
 			statusError: nil,
 		},
 		{
-			offsetResponse: sarama.NewMockOffsetFetchResponse(t).
-				SetOffset(testConsumerGroup, "testTopic", 2, 143, "", 0),
-			statusError: fmt.Errorf("consumer is not healthy: " +
-				"consumer is lagging behind for partition 2 of topic \"testTopic\" with 31 messages"),
+			consumerOffsetResponse: sarama.NewMockOffsetFetchResponse(t).SetError(1),
+			statusError:            fmt.Errorf("consumer status is unknown"),
 		},
 		{
-			offsetResponse: sarama.NewMockOffsetFetchResponse(t).SetError(1),
-			statusError:    fmt.Errorf("consumer status is unknown"),
-		},
-		{
-			offsetResponse: sarama.NewMockOffsetFetchResponse(t).
-				SetOffset(testConsumerGroup, "testTopic", 2, 143, "", 0),
+			consumerOffsetResponse: sarama.NewMockOffsetFetchResponse(t).
+				SetOffset(testConsumerGroup, monitorTopic1, monitorPartition2, 120, "", 0),
+			topicOffsetResponse: sarama.NewMockOffsetResponse(t).
+				SetOffset(monitorTopic1, monitorPartition2, sarama.OffsetNewest, 120),
 			statusError: nil,
 		},
 		{
 			subscription: &subscriptionEvent{
 				subscribed: true,
-				topic:      "testTopic2",
-				partition:  5,
+				topic:      monitorTopic2,
+				partition:  monitorPartition2,
 			},
-			offsetResponse: sarama.NewMockOffsetFetchResponse(t).
-				SetOffset(testConsumerGroup, "testTopic", 2, 253, "", 0).
-				SetOffset(testConsumerGroup, "testTopic2", 5, 40, "", 0),
+			consumerOffsetResponse: sarama.NewMockOffsetFetchResponse(t).
+				SetOffset(testConsumerGroup, monitorTopic1, monitorPartition2, 200, "", 0).
+				SetOffset(testConsumerGroup, monitorTopic2, monitorPartition2, 40, "", 0),
+			topicOffsetResponse: sarama.NewMockOffsetResponse(t).
+				SetOffset(monitorTopic1, monitorPartition2, sarama.OffsetNewest, 310).
+				SetOffset(monitorTopic2, monitorPartition2, sarama.OffsetNewest, 40),
 			statusError: fmt.Errorf("consumer is not healthy: " +
 				"consumer is lagging behind for partition 2 of topic \"testTopic\" with 110 messages"),
 		},
 		{
-			offsetResponse: sarama.NewMockOffsetFetchResponse(t).
-				SetOffset(testConsumerGroup, "testTopic", 2, 259, "", 0).
-				SetOffset(testConsumerGroup, "testTopic2", 5, 91, "", 0),
+			consumerOffsetResponse: sarama.NewMockOffsetFetchResponse(t).
+				SetOffset(testConsumerGroup, monitorTopic1, monitorPartition2, 310, "", 0).
+				SetOffset(testConsumerGroup, monitorTopic2, monitorPartition2, 100, "", 0),
+			topicOffsetResponse: sarama.NewMockOffsetResponse(t).
+				SetOffset(monitorTopic1, monitorPartition2, sarama.OffsetNewest, 315).
+				SetOffset(monitorTopic2, monitorPartition2, sarama.OffsetNewest, 151),
 			statusError: fmt.Errorf("consumer is not healthy: " +
-				"consumer is lagging behind for partition 5 of topic \"testTopic2\" with 51 messages"),
+				"consumer is lagging behind for partition 2 of topic \"testTopic2\" with 51 messages"),
 		},
 		{
-			offsetResponse: sarama.NewMockOffsetFetchResponse(t).
-				SetOffset(testConsumerGroup, "testTopic", 2, 265, "", 0).
-				SetOffset(testConsumerGroup, "testTopic2", 5, 113, "", 0),
+			consumerOffsetResponse: sarama.NewMockOffsetFetchResponse(t).
+				SetOffset(testConsumerGroup, monitorTopic1, monitorPartition2, 320, "", 0).
+				SetOffset(testConsumerGroup, monitorTopic2, monitorPartition2, 160, "", 0),
+			topicOffsetResponse: sarama.NewMockOffsetResponse(t).
+				SetOffset(monitorTopic1, monitorPartition2, sarama.OffsetNewest, 333).
+				SetOffset(monitorTopic2, monitorPartition2, sarama.OffsetNewest, 175),
 			statusError: nil,
 		},
 		{
-			offsetResponse: sarama.NewMockOffsetFetchResponse(t).
-				SetOffset(testConsumerGroup, "testTopic", 2, 295, "", 0).
-				SetOffset(testConsumerGroup, "testTopic2", 5, 173, "", 0),
+			consumerOffsetResponse: sarama.NewMockOffsetFetchResponse(t).
+				SetOffset(testConsumerGroup, monitorTopic1, monitorPartition2, 350, "", 0).
+				SetOffset(testConsumerGroup, monitorTopic2, monitorPartition2, 180, "", 0),
+			topicOffsetResponse: sarama.NewMockOffsetResponse(t).
+				SetOffset(monitorTopic1, monitorPartition2, sarama.OffsetNewest, 380).
+				SetOffset(monitorTopic2, monitorPartition2, sarama.OffsetNewest, 240),
 			statusError: fmt.Errorf("consumer is not healthy: " +
 				"consumer is lagging behind for partition 2 of topic \"testTopic\" with 30 messages ; " +
-				"consumer is lagging behind for partition 5 of topic \"testTopic2\" with 60 messages"),
+				"consumer is lagging behind for partition 2 of topic \"testTopic2\" with 60 messages"),
 		},
 		{
 			subscription: &subscriptionEvent{
 				subscribed: false,
-				topic:      "testTopic",
-				partition:  2,
+				topic:      monitorTopic1,
+				partition:  monitorPartition2,
 			},
-			offsetResponse: sarama.NewMockOffsetFetchResponse(t).
-				SetOffset(testConsumerGroup, "testTopic2", 5, 273, "", 0),
+			consumerOffsetResponse: sarama.NewMockOffsetFetchResponse(t).
+				SetOffset(testConsumerGroup, monitorTopic2, monitorPartition2, 275, "", 0),
+			topicOffsetResponse: sarama.NewMockOffsetResponse(t).
+				SetOffset(monitorTopic2, monitorPartition2, sarama.OffsetNewest, 375),
 			statusError: fmt.Errorf("consumer is not healthy: " +
-				"consumer is lagging behind for partition 5 of topic \"testTopic2\" with 100 messages"),
+				"consumer is lagging behind for partition 2 of topic \"testTopic2\" with 100 messages"),
 		},
 		{
-			offsetResponse: sarama.NewMockOffsetFetchResponse(t).
-				SetOffset(testConsumerGroup, "testTopic2", 5, 293, "", 0),
+			consumerOffsetResponse: sarama.NewMockOffsetFetchResponse(t).
+				SetOffset(testConsumerGroup, monitorTopic2, monitorPartition2, 385, "", 0),
+			topicOffsetResponse: sarama.NewMockOffsetResponse(t).
+				SetOffset(monitorTopic2, monitorPartition2, sarama.OffsetNewest, 400),
 			statusError: nil,
 		},
 		{
 			subscription: &subscriptionEvent{
 				subscribed: false,
-				topic:      "testTopic2",
-				partition:  5,
+				topic:      monitorTopic2,
+				partition:  monitorPartition2,
 			},
-			offsetResponse: sarama.NewMockOffsetFetchResponse(t),
-			statusError:    nil,
+			statusError: nil,
 		},
 		{
 			subscription: &subscriptionEvent{
 				subscribed: true,
-				topic:      "testTopic",
-				partition:  4,
+				topic:      monitorTopic1,
+				partition:  monitorPartition1,
 			},
-			offsetResponse: sarama.NewMockOffsetFetchResponse(t).
-				SetOffset(testConsumerGroup, "testTopic", 4, 1023, "", 0),
+			consumerOffsetResponse: sarama.NewMockOffsetFetchResponse(t).
+				SetOffset(testConsumerGroup, monitorTopic1, monitorPartition1, 1200, "", 0),
+			topicOffsetResponse: sarama.NewMockOffsetResponse(t).
+				SetOffset(monitorTopic1, monitorPartition1, sarama.OffsetNewest, 1205),
 			statusError: nil,
 		},
 		{
-			offsetResponse: sarama.NewMockOffsetFetchResponse(t).
-				SetOffset(testConsumerGroup, "testTopic", 4, 0, "", 5),
+			consumerOffsetResponse: sarama.NewMockOffsetFetchResponse(t).
+				SetOffset(testConsumerGroup, monitorTopic1, monitorPartition1, 0, "", 5),
 			statusError: fmt.Errorf("consumer status is unknown"),
 		},
 		{
-			offsetResponse: sarama.NewMockOffsetFetchResponse(t).
-				SetOffset(testConsumerGroup, "testTopic", 4, 1200, "", 0),
+			consumerOffsetResponse: sarama.NewMockOffsetFetchResponse(t).
+				SetOffset(testConsumerGroup, monitorTopic1, monitorPartition1, 1205, "", 0),
+			topicOffsetResponse: sarama.NewMockOffsetResponse(t).
+				SetOffset(monitorTopic1, monitorPartition1, sarama.OffsetNewest, 1226),
 			statusError: fmt.Errorf("consumer is not healthy: " +
-				"consumer is lagging behind for partition 4 of topic \"testTopic\" with 177 messages"),
+				"consumer is lagging behind for partition 1 of topic \"testTopic\" with 21 messages"),
 		},
 		{
-			offsetResponse: sarama.NewMockOffsetFetchResponse(t).
-				SetOffset(testConsumerGroup, "testTopic", 4, 1220, "", 0),
+			consumerOffsetResponse: sarama.NewMockOffsetFetchResponse(t).
+				SetOffset(testConsumerGroup, monitorTopic1, monitorPartition1, 1226, "", 0),
+			topicOffsetResponse: sarama.NewMockOffsetResponse(t).
+				SetOffset(monitorTopic1, monitorPartition1, sarama.OffsetNewest, 1246),
+			statusError: nil,
+		},
+		{
+			consumerOffsetResponse: sarama.NewMockOffsetFetchResponse(t).
+				SetOffset(testConsumerGroup, monitorTopic1, monitorPartition1, 1250, "", 0),
+			topicOffsetResponse: sarama.NewMockOffsetResponse(t).
+				SetOffset(monitorTopic1, monitorPartition1, sarama.OffsetNewest, 1249),
+			statusError: fmt.Errorf("consumer is not healthy: " +
+				"could not determine lag for partition 1 of topic \"testTopic\""),
+		},
+		{
+			consumerOffsetResponse: sarama.NewMockOffsetFetchResponse(t).
+				SetOffset(testConsumerGroup, monitorTopic1, monitorPartition1, 1250, "", 0),
+			topicOffsetResponse: sarama.NewMockOffsetResponse(t).
+				SetOffset(monitorTopic1, monitorPartition1, sarama.OffsetNewest, 1275),
+			statusError: fmt.Errorf("consumer is not healthy: " +
+				"consumer is lagging behind for partition 1 of topic \"testTopic\" with 25 messages"),
+		},
+		{
+			consumerOffsetResponse: sarama.NewMockOffsetFetchResponse(t).
+				SetOffset(testConsumerGroup, monitorTopic1, monitorPartition1, 1300, "", 0),
+			topicOffsetResponse: sarama.NewMockOffsetResponse(t).
+				SetOffset(monitorTopic1, monitorPartition1, sarama.OffsetNewest, 1300),
 			statusError: nil,
 		},
 	}
 
 	brokerWrapper := newMockBrokerWrapper(t)
 
-	offsetFetcher, err := sarama.NewClusterAdmin([]string{brokerWrapper.broker.Addr()}, nil)
+	client, err := sarama.NewClient([]string{brokerWrapper.broker.Addr()}, nil)
+	require.NoError(t, err)
+
+	admin, err := sarama.NewClusterAdminFromClient(client)
 	require.NoError(t, err)
 
 	log := logger.NewUPPLogger("monitor_test", "INFO")
 	topics := []*Topic{
-		NewTopic("testTopic", WithLagTolerance(20)),
-		NewTopic("testTopic2", WithLagTolerance(50)),
+		NewTopic(monitorTopic1, WithLagTolerance(monitorTopic1LagTolerance)),
+		NewTopic(monitorTopic2, WithLagTolerance(monitorTopic2LagTolerance)),
 	}
-	monitor := newConsumerMonitor(config, offsetFetcher, topics, log)
+	monitor := newConsumerMonitor(config, admin, client, topics, log)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -399,7 +518,7 @@ func TestConsumerMonitor_Workflow(t *testing.T) {
 			subscriptions <- update.subscription
 		}
 
-		brokerWrapper.setOffsetFetchResponse(update.offsetResponse)
+		brokerWrapper.setOffsetFetchResponses(update.consumerOffsetResponse, update.topicOffsetResponse)
 
 		time.Sleep(fetchHandlingInterval) // Wait for the new response to be fetched and handled.
 

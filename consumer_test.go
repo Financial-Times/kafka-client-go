@@ -189,8 +189,8 @@ func NewMockConsumer() *Consumer {
 		},
 		monitorLock: &sync.RWMutex{},
 		monitor: &consumerMonitor{
-			subscriptions: map[string]map[int32]int64{},
-			offsetFetcher: &offsetFetcherMock{},
+			subscriptions:         map[string][]int32{},
+			consumerOffsetFetcher: &consumerOffsetFetcherMock{},
 			scheduler: fetcherScheduler{
 				standardInterval: time.Minute,
 			},

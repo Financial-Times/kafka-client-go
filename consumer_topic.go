@@ -7,10 +7,9 @@ type subscriptionEvent struct {
 }
 
 type Topic struct {
-	Name              string
-	lagTolerance      int64
-	offsetsNotFetched bool
-	partitionLag      map[int32]int64
+	Name         string
+	lagTolerance int64
+	partitionLag map[int32]int64
 }
 
 type TopicOption func(topic *Topic)

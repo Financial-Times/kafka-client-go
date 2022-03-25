@@ -96,15 +96,15 @@ func (c *Consumer) connect() {
 		defer wg.Done()
 
 		for {
-			offsetFetcher, err := newConsumerGroupOffsetFetcher(c.config)
+			consumerFetcher, topicFetcher, err := newConsumerGroupOffsetFetchers(c.config)
 			if err == nil {
-				log.Info("Established Kafka offset fetcher connection")
-				monitor := newConsumerMonitor(c.config, offsetFetcher, c.topics, c.logger)
+				log.Info("Established Kafka offset fetcher connections")
+				monitor := newConsumerMonitor(c.config, consumerFetcher, topicFetcher, c.topics, c.logger)
 				c.setMonitor(monitor)
 				return
 			}
 
-			log.WithError(err).Warn("Error creating Kafka offset fetcher")
+			log.WithError(err).Warn("Error creating Kafka offset fetchers")
 			time.Sleep(connectionRetryInterval)
 		}
 	}()
@@ -174,8 +174,8 @@ func (c *Consumer) consumeMessages(ctx context.Context, topics []string, handler
 //
 // The consumer monitoring process is using a separate Kafka connection and will:
 //  1. Request the offsets for a topic and the respective claimed partitions on a given time interval from the Kafka broker;
-//  2. Deduce the message lag by subtracting the fetched and previously stored offsets;
-//  2. Store the partition lag if such is present and overwrite the previously stored offsets;
+//  2. Deduce the message lag by subtracting the last committed consumer group offset from the next topic offset;
+//  2. Store the partition lag if such is present;
 //  4. Report a status error on MonitorCheck() calls.
 //
 // Close() calls will terminate both the message consumption and the consumer monitoring processes.
@@ -202,7 +202,6 @@ func (c *Consumer) Start(messageHandler func(message FTMessage)) {
 
 		// Terminate the message consumption and consumer monitoring.
 		cancel()
-		return
 	}()
 
 	c.logger.Info("Starting consumer...")
@@ -258,12 +257,23 @@ func newConsumerGroup(config ConsumerConfig) (sarama.ConsumerGroup, error) {
 	return sarama.NewConsumerGroup(brokers, config.ConsumerGroup, config.Options)
 }
 
-func newConsumerGroupOffsetFetcher(config ConsumerConfig) (offsetFetcher, error) {
+func newConsumerGroupOffsetFetchers(config ConsumerConfig) (consumerOffsetFetcher, topicOffsetFetcher, error) {
 	options := sarama.NewConfig()
 	options.Version = sarama.V2_8_1_0
 
 	brokers := strings.Split(config.BrokersConnectionString, ",")
-	return sarama.NewClusterAdmin(brokers, options)
+	client, err := sarama.NewClient(brokers, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	admin, err := sarama.NewClusterAdminFromClient(client)
+	if err != nil {
+		_ = client.Close()
+		return nil, nil, err
+	}
+
+	return admin, client, nil
 }
 
 // DefaultConsumerOptions returns a new sarama configuration with predefined default settings.
