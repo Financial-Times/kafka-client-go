@@ -306,8 +306,8 @@ func (w *mockBrokerWrapper) setOffsetFetchResponses(consumerOffsetResponse *sara
 }
 
 func TestConsumerMonitor_Workflow(t *testing.T) {
-	fetchInterval := 1650 * time.Millisecond
-	fetchHandlingInterval := 1800 * time.Millisecond
+	fetchInterval := 550 * time.Millisecond
+	fetchHandlingInterval := 600 * time.Millisecond
 
 	config := ConsumerConfig{
 		ConsumerGroup:              testConsumerGroup,
