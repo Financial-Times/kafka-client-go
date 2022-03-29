@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"sort"
 	"testing"
 	"time"
 
@@ -264,6 +265,12 @@ func TestConsumerMonitor_FetchOffsets(t *testing.T) {
 			}
 
 			require.NoError(t, err)
+
+			for _, offsets := range offsets {
+				sort.Slice(offsets, func(i, j int) bool {
+					return offsets[i].Partition < offsets[j].Partition
+				})
+			}
 			assert.True(t, reflect.DeepEqual(test.offsetsResults, offsets))
 		})
 	}
