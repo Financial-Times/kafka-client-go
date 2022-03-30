@@ -35,7 +35,7 @@ func TestE2EPubSub(t *testing.T) {
 
 	consumer := NewKafkaConsumer(e2eTestTopic)
 
-	go consumer.StartListening(messageHandler)
+	go consumer.Start(messageHandler)
 	time.Sleep(5 * time.Second) // Let partition claiming take place.
 
 	require.NoError(t, consumer.ConnectivityCheck())

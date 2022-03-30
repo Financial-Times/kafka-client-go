@@ -10,7 +10,7 @@ import (
 	"github.com/Shopify/sarama"
 )
 
-const errProducerNotConnected = "producer is not connected to Kafka"
+var ErrProducerNotConnected = fmt.Errorf("producer is not connected to Kafka")
 
 // Producer which will keep trying to reconnect to Kafka on a specified interval.
 // The underlying producer is created in a separate go-routine when the Producer is initialized.
@@ -24,43 +24,46 @@ type Producer struct {
 type ProducerConfig struct {
 	BrokersConnectionString string
 	Topic                   string
+	// Time interval between each connection attempt.
+	// Only used for subsequent attempts if the initial one fails.
+	// Default value (1 minute) would be used if not set or exceeds 5 minutes.
+	ConnectionRetryInterval time.Duration
 	Options                 *sarama.Config
 }
 
-func NewProducer(config ProducerConfig, logger *logger.UPPLogger, initialDelay, retryInterval time.Duration) *Producer {
+func NewProducer(config ProducerConfig, logger *logger.UPPLogger) *Producer {
 	producer := &Producer{
 		config:       config,
 		producerLock: &sync.RWMutex{},
 		logger:       logger,
 	}
 
-	go func() {
-		if initialDelay > 0 {
-			time.Sleep(initialDelay)
-		}
-
-		producer.connect(retryInterval)
-	}()
+	go producer.connect()
 
 	return producer
 }
 
 // connect tries to establish a connection to Kafka and will retry endlessly.
-func (p *Producer) connect(retryInterval time.Duration) {
-	connectorLog := p.logger.
+func (p *Producer) connect() {
+	log := p.logger.
 		WithField("brokers", p.config.BrokersConnectionString).
 		WithField("topic", p.config.Topic)
+
+	connectionRetryInterval := p.config.ConnectionRetryInterval
+	if connectionRetryInterval <= 0 || connectionRetryInterval > maxConnectionRetryInterval {
+		connectionRetryInterval = defaultConnectionRetryInterval
+	}
 
 	for {
 		producer, err := newProducer(p.config)
 		if err == nil {
-			connectorLog.Info("Connected to Kafka producer")
+			log.Info("Connected to Kafka producer")
 			p.setProducer(producer)
 			break
 		}
 
-		connectorLog.WithError(err).Warn("Error creating Kafka producer")
-		time.Sleep(retryInterval)
+		log.WithError(err).Warn("Error creating Kafka producer")
+		time.Sleep(connectionRetryInterval)
 	}
 }
 
@@ -84,7 +87,7 @@ func (p *Producer) isConnected() bool {
 // SendMessage checks if the producer is connected, then sends a message to Kafka.
 func (p *Producer) SendMessage(message FTMessage) error {
 	if !p.isConnected() {
-		return fmt.Errorf(errProducerNotConnected)
+		return ErrProducerNotConnected
 	}
 
 	_, _, err := p.producer.SendMessage(&sarama.ProducerMessage{
@@ -107,7 +110,7 @@ func (p *Producer) Close() error {
 // ConnectivityCheck checks whether a connection to Kafka can be established.
 func (p *Producer) ConnectivityCheck() error {
 	if !p.isConnected() {
-		return fmt.Errorf(errProducerNotConnected)
+		return ErrProducerNotConnected
 	}
 
 	producer, err := newProducer(p.config)

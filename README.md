@@ -20,7 +20,7 @@ The library is NOT using Zookeeper to connect to Kafka under the hood.
 Importing:
 
 ```go
-    import "github.com/Financial-Times/kafka-client-go/v2"
+    import "github.com/Financial-Times/kafka-client-go/v3"
 ```
 
 ### Producer
@@ -30,15 +30,13 @@ Creating a producer:
 ```go
     config := kafka.ProducerConfig{
         BrokersConnectionString: "", // Comma-separated list of Kafka brokers
-        Topic:                   "", // Topic to publish to
+        Topic:                   "", // Topic to publish to 
+        ConnectionRetryInterval: 0,  // Duration between each retry for establishing connection
     }
-
-    initialDelay := time.Second // Duration to await before trying to establish connection
-    retryInterval := time.Second // Duration between each retry for establishing connection
 
     logger := logger.NewUPPLogger(...)
     
-    producer := kafka.NewProducer(config, logger, initialDelay, retryInterval)
+    producer := kafka.NewProducer(config, logger)
 ```
 
 The connection to Kafka is started in a separate go routine when creating the producer.
@@ -52,6 +50,13 @@ Sending a message:
     
     err := producer.SendMessage(message)
     // Error handling
+```
+
+The health of the Kafka cluster can be checked by attempting to establish separate connection with the provided configuration:
+
+```go
+   err := producer.ConnectivityCheck()
+   // Error handling
 ```
 
 Connection should be closed by the client:
@@ -69,26 +74,43 @@ Creating a consumer:
     config := kafka.ConsumerConfig{
         BrokersConnectionString: "", // Comma-separated list of Kafka brokers
         ConsumerGroup:           "", // Unique name of a consumer group
-        Topics:                  []string{}, // Comma-separated list of topics to consume from
+        ConnectionRetryInterval: 0,  // Duration between each retry for establishing connection
+}
+
+    topics := []*kafka.Topic{
+        kafka.NewTopic(""),                             // Topic to consume from
+        kafka.NewTopic("", kafka.WithLagTolerance(50)), // Topic to consume from with custom lag tolerance used for monitoring
     }
-    
-    retryInterval := time.Second // Duration between each retry for establishing connection
-    
+	
     logger := logger.NewUPPLogger(...)
 
-    consumer := kafka.NewConsumer(config, logger, retryInterval)
+    consumer := kafka.NewConsumer(config, topics, logger)
 ```
 
 Consuming messages:
 
-Consumer groups are lazily initialized i.e. establishing connection to Kafka is done within `StartListening()`.
+Consumer groups are lazily initialized i.e. establishing connection to Kafka is done within `Start()`.
 
 ```go
     handler := func(message kafka.FTMessage) {
         // Message handling
     }
     
-    go consumer.StartListening(handler) // Blocking until connection is established
+    go consumer.Start(handler) // Blocking until connection is established
+```
+
+The health of the Kafka cluster can be checked by attempting to establish separate connection with the provided configuration:
+
+```go
+   err := consumer.ConnectivityCheck()
+   // Error handling
+```
+
+The health of the consumer process is also being monitored and its status can be accessed:
+
+```go
+   err := consumer.MonitorCheck()
+   // Error handling
 ```
 
 Connections should be closed by the client:

@@ -59,7 +59,7 @@ func TestProducer_SendMessage_NoConnection(t *testing.T) {
 	}
 
 	err := producer.SendMessage(msg)
-	assert.EqualError(t, err, errProducerNotConnected)
+	assert.ErrorIs(t, err, ErrProducerNotConnected)
 }
 
 func TestProducer_InvalidConnection(t *testing.T) {
@@ -81,11 +81,12 @@ func NewKafkaProducer(topic string) *Producer {
 	log := logger.NewUPPLogger("test", "INFO")
 	config := ProducerConfig{
 		BrokersConnectionString: testBrokers,
+		ConnectionRetryInterval: time.Second,
 		Topic:                   topic,
 		Options:                 DefaultProducerOptions(),
 	}
 
-	producer := NewProducer(config, log, 0, time.Second)
+	producer := NewProducer(config, log)
 
 	time.Sleep(time.Second) // Let connection take place.
 

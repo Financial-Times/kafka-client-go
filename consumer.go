@@ -12,15 +12,25 @@ import (
 	"github.com/Shopify/sarama"
 )
 
-const errConsumerNotConnected = "consumer is not connected to Kafka"
+var (
+	ErrConsumerNotConnected = fmt.Errorf("consumer is not connected to Kafka")
+	ErrMonitorNotConnected  = fmt.Errorf("consumer monitor is not connected to Kafka")
+)
+
+const (
+	maxConnectionRetryInterval     = 5 * time.Minute
+	defaultConnectionRetryInterval = 1 * time.Minute
+)
 
 // Consumer which will keep trying to reconnect to Kafka on a specified interval.
 // The underlying consumer group is created lazily when message listening is started.
 type Consumer struct {
 	config            ConsumerConfig
+	topics            []*Topic
 	consumerGroupLock *sync.RWMutex
 	consumerGroup     sarama.ConsumerGroup
-	retryInterval     time.Duration
+	monitorLock       *sync.RWMutex
+	monitor           *consumerMonitor
 	logger            *logger.UPPLogger
 	closed            chan struct{}
 }
@@ -28,42 +38,85 @@ type Consumer struct {
 type ConsumerConfig struct {
 	BrokersConnectionString string
 	ConsumerGroup           string
-	Topics                  []string
-	Options                 *sarama.Config
+	// Time interval between each connection attempt.
+	// Only used for subsequent attempts if the initial one fails.
+	// Default value (1 minute) would be used if not set or exceeds 5 minutes.
+	ConnectionRetryInterval time.Duration
+	// Time interval between each offset fetching request.
+	// Default value (3 minutes) would be used if not set or exceeds 10 minutes.
+	OffsetFetchInterval time.Duration
+	// Total count of offset fetching request failures until consumer status is marked as unknown.
+	// Default value (5) would be used if not set or exceeds 10.
+	// Note: A single failure will result in follow-up requests to be sent on
+	// shorter interval than the value of OffsetFetchInterval until successful.
+	OffsetFetchMaxFailureCount int
+	Options                    *sarama.Config
 }
 
-func NewConsumer(config ConsumerConfig, log *logger.UPPLogger, retryInterval time.Duration) *Consumer {
+func NewConsumer(config ConsumerConfig, topics []*Topic, log *logger.UPPLogger) *Consumer {
 	consumer := &Consumer{
 		config:            config,
+		topics:            topics,
 		consumerGroupLock: &sync.RWMutex{},
-		retryInterval:     retryInterval,
+		monitorLock:       &sync.RWMutex{},
 		logger:            log,
 		closed:            make(chan struct{}),
 	}
+
 	return consumer
 }
 
 // connect will attempt to create a new consumer continuously until successful.
 func (c *Consumer) connect() {
-	connectorLog := c.logger.
+	log := c.logger.
 		WithField("brokers", c.config.BrokersConnectionString).
-		WithField("topics", c.config.Topics).
+		WithField("topics", c.topics).
 		WithField("consumer_group", c.config.ConsumerGroup)
 
-	for {
-		consumerGroup, err := newConsumerGroup(c.config)
-		if err == nil {
-			connectorLog.Info("Connected to Kafka consumer group")
-			c.setConsumerGroup(consumerGroup)
-			break
-		}
-
-		connectorLog.WithError(err).Warn("Error creating Kafka consumer group")
-		time.Sleep(c.retryInterval)
+	connectionRetryInterval := c.config.ConnectionRetryInterval
+	if connectionRetryInterval <= 0 || connectionRetryInterval > maxConnectionRetryInterval {
+		connectionRetryInterval = defaultConnectionRetryInterval
 	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+
+		for {
+			consumerGroup, err := newConsumerGroup(c.config)
+			if err == nil {
+				log.Info("Established Kafka consumer group connection")
+				c.setConsumerGroup(consumerGroup)
+				return
+			}
+
+			log.WithError(err).Warn("Error creating Kafka consumer group")
+			time.Sleep(connectionRetryInterval)
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+
+		for {
+			consumerFetcher, topicFetcher, err := newConsumerGroupOffsetFetchers(c.config)
+			if err == nil {
+				log.Info("Established Kafka offset fetcher connections")
+				monitor := newConsumerMonitor(c.config, consumerFetcher, topicFetcher, c.topics, c.logger)
+				c.setMonitor(monitor)
+				return
+			}
+
+			log.WithError(err).Warn("Error creating Kafka offset fetchers")
+			time.Sleep(connectionRetryInterval)
+		}
+	}()
+
+	wg.Wait()
 }
 
-// setConsumerGroup sets the Consumer's consumer group.
 func (c *Consumer) setConsumerGroup(consumerGroup sarama.ConsumerGroup) {
 	c.consumerGroupLock.Lock()
 	defer c.consumerGroupLock.Unlock()
@@ -80,49 +133,80 @@ func (c *Consumer) isConnected() bool {
 	return c.consumerGroup != nil
 }
 
-// StartListening is a blocking call that tries to establish a connection to Kafka and then starts listening.
-func (c *Consumer) StartListening(messageHandler func(message FTMessage)) {
+func (c *Consumer) setMonitor(monitor *consumerMonitor) {
+	c.monitorLock.Lock()
+	defer c.monitorLock.Unlock()
+
+	c.monitor = monitor
+}
+
+// isMonitorConnected returns whether the consumer monitor is set.
+// It is only set if a successful connection is established.
+func (c *Consumer) isMonitorConnected() bool {
+	c.monitorLock.RLock()
+	defer c.monitorLock.RUnlock()
+
+	return c.monitor != nil
+}
+
+func (c *Consumer) consumeMessages(ctx context.Context, topics []string, handler *consumerHandler) {
+	log := c.logger.WithField("process", "Consumer")
+
+	go func() {
+		for err := range c.consumerGroup.Errors() {
+			log.WithError(err).Error("Error consuming message")
+		}
+	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("Terminating consumer...")
+			return
+
+		default:
+			if err := c.consumerGroup.Consume(ctx, topics, handler); err != nil {
+				log.WithError(err).Error("Error occurred during consumer group lifecycle")
+			}
+		}
+	}
+}
+
+// Start will attempt to establish consumer group and consumer monitor connections until successful.
+// Once those are established, message consumption and consumer monitoring processes are started.
+//
+// Each message will be handled using the provided handler.
+//
+// The consumer monitoring process is using a separate Kafka connection and will:
+//  1. Request the offsets for a topic and the respective claimed partitions on a given time interval from the Kafka broker;
+//  2. Deduce the message lag by subtracting the last committed consumer group offset from the next topic offset;
+//  2. Store the partition lag if such is present;
+//  4. Report a status error on MonitorCheck() calls.
+//
+// Close() calls will terminate both the message consumption and the consumer monitoring processes.
+func (c *Consumer) Start(messageHandler func(message FTMessage)) {
 	if !c.isConnected() {
 		c.connect()
 	}
 
-	handler := newConsumerHandler(c.logger, messageHandler)
-
-	go func() {
-		for err := range c.consumerGroup.Errors() {
-			c.logger.WithError(err).
-				WithField("method", "StartListening").
-				Error("Error processing message")
-		}
-	}()
-
 	ctx, cancel := context.WithCancel(context.Background())
+	subscriptions := make(chan *subscriptionEvent, 50)
+
+	handler := newConsumerHandler(subscriptions, messageHandler)
+
+	topics := make([]string, 0, len(c.topics))
+	for _, topic := range c.topics {
+		topics = append(topics, topic.Name)
+	}
+
+	go c.consumeMessages(ctx, topics, handler)
+	go c.monitor.run(ctx, subscriptions)
 
 	go func() {
-		for {
-			if err := c.consumerGroup.Consume(ctx, c.config.Topics, handler); err != nil {
-				c.logger.WithError(err).
-					WithField("method", "StartListening").
-					Error("Error starting consumer")
-			}
-			// Check if context was cancelled, signaling that the consumer should stop.
-			if ctx.Err() != nil {
-				return
-			}
-		}
-	}()
+		<-c.closed
 
-	go func() {
-		for {
-			select {
-			case <-handler.ready:
-				c.logger.Debug("New consumer group session starting...")
-			case <-c.closed:
-				// Terminate the message consumption.
-				cancel()
-				return
-			}
-		}
+		// Terminate the message consumption and consumer monitoring.
+		cancel()
 	}()
 
 	c.logger.Info("Starting consumer...")
@@ -142,13 +226,12 @@ func (c *Consumer) Close() error {
 // ConnectivityCheck checks whether a connection to Kafka can be established.
 func (c *Consumer) ConnectivityCheck() error {
 	if !c.isConnected() {
-		return fmt.Errorf(errConsumerNotConnected)
+		return ErrConsumerNotConnected
 	}
 
 	config := ConsumerConfig{
 		BrokersConnectionString: c.config.BrokersConnectionString,
 		ConsumerGroup:           fmt.Sprintf("healthcheck-%d", rand.Intn(100)),
-		Topics:                  c.config.Topics,
 		Options:                 c.config.Options,
 	}
 	consumerGroup, err := newConsumerGroup(config)
@@ -161,6 +244,15 @@ func (c *Consumer) ConnectivityCheck() error {
 	return nil
 }
 
+// MonitorCheck checks whether the consumer group is lagging behind when reading messages.
+func (c *Consumer) MonitorCheck() error {
+	if !c.isMonitorConnected() {
+		return ErrMonitorNotConnected
+	}
+
+	return c.monitor.consumerStatus()
+}
+
 func newConsumerGroup(config ConsumerConfig) (sarama.ConsumerGroup, error) {
 	if config.Options == nil {
 		config.Options = DefaultConsumerOptions()
@@ -170,10 +262,30 @@ func newConsumerGroup(config ConsumerConfig) (sarama.ConsumerGroup, error) {
 	return sarama.NewConsumerGroup(brokers, config.ConsumerGroup, config.Options)
 }
 
+func newConsumerGroupOffsetFetchers(config ConsumerConfig) (consumerOffsetFetcher, topicOffsetFetcher, error) {
+	options := sarama.NewConfig()
+	options.Version = sarama.V2_8_1_0
+
+	brokers := strings.Split(config.BrokersConnectionString, ",")
+	client, err := sarama.NewClient(brokers, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	admin, err := sarama.NewClusterAdminFromClient(client)
+	if err != nil {
+		_ = client.Close()
+		return nil, nil, err
+	}
+
+	return admin, client, nil
+}
+
 // DefaultConsumerOptions returns a new sarama configuration with predefined default settings.
 func DefaultConsumerOptions() *sarama.Config {
 	config := sarama.NewConfig()
 	config.Consumer.Offsets.Initial = sarama.OffsetNewest
 	config.Consumer.MaxProcessingTime = 10 * time.Second
+	config.Consumer.Return.Errors = true
 	return config
 }
