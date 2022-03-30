@@ -26,7 +26,7 @@ type ProducerConfig struct {
 	Topic                   string
 	// Time interval between each connection attempt.
 	// Only used for subsequent attempts if the initial one fails.
-	// Default is 1 minute. Maximum is 5 minutes.
+	// Default value (1 minute) would be used if not set or exceeds 5 minutes.
 	ConnectionRetryInterval time.Duration
 	Options                 *sarama.Config
 }
@@ -50,8 +50,8 @@ func (p *Producer) connect() {
 		WithField("topic", p.config.Topic)
 
 	connectionRetryInterval := p.config.ConnectionRetryInterval
-	if connectionRetryInterval <= 0 || connectionRetryInterval > 5*time.Minute {
-		connectionRetryInterval = time.Minute
+	if connectionRetryInterval <= 0 || connectionRetryInterval > maxConnectionRetryInterval {
+		connectionRetryInterval = defaultConnectionRetryInterval
 	}
 
 	for {

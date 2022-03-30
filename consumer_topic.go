@@ -1,5 +1,7 @@
 package kafka
 
+const defaultLagTolerance = 500
+
 type subscriptionEvent struct {
 	subscribed bool
 	topic      string
@@ -25,7 +27,7 @@ func NewTopic(name string, opts ...TopicOption) *Topic {
 	}
 
 	if t.lagTolerance == 0 {
-		t.lagTolerance = 500
+		t.lagTolerance = defaultLagTolerance
 	}
 
 	return t

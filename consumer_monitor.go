@@ -12,6 +12,14 @@ import (
 	"github.com/Shopify/sarama"
 )
 
+const (
+	maxOffsetFetchInterval     = 10 * time.Minute
+	defaultOffsetFetchInterval = 3 * time.Minute
+
+	maxOffsetFetchFailureCount     = 10
+	defaultOffsetFetchFailureCount = 5
+)
+
 type topicOffsetFetcher interface {
 	GetOffset(topic string, partitionID int32, position int64) (int64, error)
 }
@@ -53,12 +61,12 @@ type consumerMonitor struct {
 
 func newConsumerMonitor(config ConsumerConfig, consumerFetcher consumerOffsetFetcher, topicFetcher topicOffsetFetcher, topics []*Topic, logger *logger.UPPLogger) *consumerMonitor {
 	offsetFetchInterval := config.OffsetFetchInterval
-	if offsetFetchInterval <= 0 || offsetFetchInterval > 10*time.Minute {
-		offsetFetchInterval = 3 * time.Minute
+	if offsetFetchInterval <= 0 || offsetFetchInterval > maxOffsetFetchInterval {
+		offsetFetchInterval = defaultOffsetFetchInterval
 	}
 	maxFailureCount := config.OffsetFetchMaxFailureCount
-	if maxFailureCount <= 0 || maxFailureCount > 10 {
-		maxFailureCount = 5
+	if maxFailureCount <= 0 || maxFailureCount > maxOffsetFetchFailureCount {
+		maxFailureCount = defaultOffsetFetchFailureCount
 	}
 
 	return &consumerMonitor{

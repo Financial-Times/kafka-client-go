@@ -17,6 +17,11 @@ var (
 	ErrMonitorNotConnected  = fmt.Errorf("consumer monitor is not connected to Kafka")
 )
 
+const (
+	maxConnectionRetryInterval     = 5 * time.Minute
+	defaultConnectionRetryInterval = 1 * time.Minute
+)
+
 // Consumer which will keep trying to reconnect to Kafka on a specified interval.
 // The underlying consumer group is created lazily when message listening is started.
 type Consumer struct {
@@ -35,13 +40,13 @@ type ConsumerConfig struct {
 	ConsumerGroup           string
 	// Time interval between each connection attempt.
 	// Only used for subsequent attempts if the initial one fails.
-	// Default is 1 minute. Maximum is 5 minutes.
+	// Default value (1 minute) would be used if not set or exceeds 5 minutes.
 	ConnectionRetryInterval time.Duration
 	// Time interval between each offset fetching request.
-	// Default is 3 minutes. Maximum is 10 minutes.
+	// Default value (3 minutes) would be used if not set or exceeds 10 minutes.
 	OffsetFetchInterval time.Duration
 	// Total count of offset fetching request failures until consumer status is marked as unknown.
-	// Default is 5. Maximum is 10.
+	// Default value (5) would be used if not set or exceeds 10.
 	// Note: A single failure will result in follow-up requests to be sent on
 	// shorter interval than the value of OffsetFetchInterval until successful.
 	OffsetFetchMaxFailureCount int
@@ -69,8 +74,8 @@ func (c *Consumer) connect() {
 		WithField("consumer_group", c.config.ConsumerGroup)
 
 	connectionRetryInterval := c.config.ConnectionRetryInterval
-	if connectionRetryInterval <= 0 || connectionRetryInterval > 5*time.Minute {
-		connectionRetryInterval = time.Minute
+	if connectionRetryInterval <= 0 || connectionRetryInterval > maxConnectionRetryInterval {
+		connectionRetryInterval = defaultConnectionRetryInterval
 	}
 
 	var wg sync.WaitGroup
