@@ -2,10 +2,12 @@ package kafka
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/Financial-Times/go-logger/v2"
@@ -47,6 +49,7 @@ type fetcherScheduler struct {
 }
 
 type consumerMonitor struct {
+	connectionString      string
 	consumerGroup         string
 	consumerOffsetFetcher consumerOffsetFetcher
 	topicOffsetFetcher    topicOffsetFetcher
@@ -70,7 +73,8 @@ func newConsumerMonitor(config ConsumerConfig, consumerFetcher consumerOffsetFet
 	}
 
 	return &consumerMonitor{
-		consumerGroup: config.ConsumerGroup,
+		connectionString: config.BrokersConnectionString,
+		consumerGroup:    config.ConsumerGroup,
 		scheduler: fetcherScheduler{
 			standardInterval:  offsetFetchInterval,
 			shortenedInterval: offsetFetchInterval / 3,
@@ -128,6 +132,25 @@ func (m *consumerMonitor) run(ctx context.Context, subscriptionEvents chan *subs
 						m.scheduler.failureCount)
 
 					m.clearConsumerStatus()
+
+					// It's necessary to restart the connection on broken pipe errors due to a
+					// bug in the Sarama library: https://github.com/Shopify/sarama/issues/1796
+					if errors.Is(err, syscall.EPIPE) {
+						log.Info("Attempting to re-establish monitoring connection...")
+
+						consumerFetcher, topicFetcher, err := newConsumerGroupOffsetFetchers(m.connectionString)
+						if err != nil {
+							log.WithError(err).Warn("Failed to establish new monitoring connection")
+						} else {
+							// Terminate the old connection and replace it.
+							_ = m.consumerOffsetFetcher.Close()
+
+							m.consumerOffsetFetcher = consumerFetcher
+							m.topicOffsetFetcher = topicFetcher
+
+							log.Info("Established new monitoring connection")
+						}
+					}
 				}
 
 				m.scheduler.ticker.Reset(m.scheduler.shortenedInterval)
