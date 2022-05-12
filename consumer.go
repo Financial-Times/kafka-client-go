@@ -101,7 +101,7 @@ func (c *Consumer) connect() {
 		defer wg.Done()
 
 		for {
-			consumerFetcher, topicFetcher, err := newConsumerGroupOffsetFetchers(c.config)
+			consumerFetcher, topicFetcher, err := newConsumerGroupOffsetFetchers(c.config.BrokersConnectionString)
 			if err == nil {
 				log.Info("Established Kafka offset fetcher connections")
 				monitor := newConsumerMonitor(c.config, consumerFetcher, topicFetcher, c.topics, c.logger)
@@ -262,11 +262,11 @@ func newConsumerGroup(config ConsumerConfig) (sarama.ConsumerGroup, error) {
 	return sarama.NewConsumerGroup(brokers, config.ConsumerGroup, config.Options)
 }
 
-func newConsumerGroupOffsetFetchers(config ConsumerConfig) (consumerOffsetFetcher, topicOffsetFetcher, error) {
+func newConsumerGroupOffsetFetchers(brokerConnectionString string) (consumerOffsetFetcher, topicOffsetFetcher, error) {
 	options := sarama.NewConfig()
 	options.Version = sarama.V2_8_1_0
 
-	brokers := strings.Split(config.BrokersConnectionString, ",")
+	brokers := strings.Split(brokerConnectionString, ",")
 	client, err := sarama.NewClient(brokers, options)
 	if err != nil {
 		return nil, nil, err

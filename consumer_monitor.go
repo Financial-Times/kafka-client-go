@@ -2,10 +2,12 @@ package kafka
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/Financial-Times/go-logger/v2"
@@ -47,6 +49,7 @@ type fetcherScheduler struct {
 }
 
 type consumerMonitor struct {
+	connectionString      string
 	consumerGroup         string
 	consumerOffsetFetcher consumerOffsetFetcher
 	topicOffsetFetcher    topicOffsetFetcher
@@ -70,7 +73,8 @@ func newConsumerMonitor(config ConsumerConfig, consumerFetcher consumerOffsetFet
 	}
 
 	return &consumerMonitor{
-		consumerGroup: config.ConsumerGroup,
+		connectionString: config.BrokersConnectionString,
+		consumerGroup:    config.ConsumerGroup,
 		scheduler: fetcherScheduler{
 			standardInterval:  offsetFetchInterval,
 			shortenedInterval: offsetFetchInterval / 3,
@@ -122,16 +126,49 @@ func (m *consumerMonitor) run(ctx context.Context, subscriptionEvents chan *subs
 			if err != nil {
 				log.WithError(err).Error("Failed to fetch consumer offsets")
 
-				m.scheduler.failureCount++
-				if m.scheduler.failureCount >= m.scheduler.maxFailureCount {
-					log.Errorf("Fetching offsets failed %d times in a row. Consumer status data is stale.",
-						m.scheduler.failureCount)
+				m.scheduler.ticker.Reset(m.scheduler.shortenedInterval)
 
-					m.clearConsumerStatus()
+				m.scheduler.failureCount++
+				if m.scheduler.failureCount < m.scheduler.maxFailureCount {
+					continue
 				}
 
-				m.scheduler.ticker.Reset(m.scheduler.shortenedInterval)
-				continue
+				log.Errorf("Fetching offsets failed %d times in a row. Consumer status data is stale.",
+					m.scheduler.failureCount)
+
+				if !errors.Is(err, syscall.EPIPE) {
+					m.clearConsumerStatus()
+					continue
+				}
+
+				// It's necessary to restart the connection on broken pipe errors due to a
+				// bug in the Sarama library: https://github.com/Shopify/sarama/issues/1796
+				log.Info("Attempting to re-establish monitoring connection...")
+
+				consumerOffsetFetcher, topicOffsetFetcher, err := newConsumerGroupOffsetFetchers(m.connectionString)
+				if err != nil {
+					log.WithError(err).Warn("Failed to establish new monitoring connection")
+
+					m.clearConsumerStatus()
+					continue
+				}
+
+				// Terminate the old connection and replace it.
+				_ = m.consumerOffsetFetcher.Close()
+
+				m.consumerOffsetFetcher = consumerOffsetFetcher
+				m.topicOffsetFetcher = topicOffsetFetcher
+
+				log.Info("Established new monitoring connection")
+
+				// Re-attempt to fetch offsets and clear the status on failure.
+				offsets, err = m.fetchOffsets()
+				if err != nil {
+					log.WithError(err).Error("Failed to fetch consumer offsets after resetting the connection")
+
+					m.clearConsumerStatus()
+					continue
+				}
 			}
 
 			log.WithField("offsets", offsets).Debug("Offsets fetched successfully")
