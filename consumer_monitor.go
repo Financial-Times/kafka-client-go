@@ -47,11 +47,12 @@ type fetcherScheduler struct {
 }
 
 type consumerMonitor struct {
-	connectionString      string
-	consumerGroup         string
-	consumerOffsetFetcher consumerOffsetFetcher
-	topicOffsetFetcher    topicOffsetFetcher
-	scheduler             fetcherScheduler
+	connectionString        string
+	consumerGroup           string
+	consumerOffsetFetcher   consumerOffsetFetcher
+	topicOffsetFetcher      topicOffsetFetcher
+	scheduler               fetcherScheduler
+	connectionResetDisabled bool
 	// Key is Topic. Values are Partitions.
 	subscriptions map[string][]int32
 	topicsLock    *sync.RWMutex
@@ -78,12 +79,13 @@ func newConsumerMonitor(config ConsumerConfig, consumerFetcher consumerOffsetFet
 			shortenedInterval: offsetFetchInterval / 3,
 			maxFailureCount:   maxFailureCount,
 		},
-		consumerOffsetFetcher: consumerFetcher,
-		topicOffsetFetcher:    topicFetcher,
-		subscriptions:         map[string][]int32{},
-		topicsLock:            &sync.RWMutex{},
-		topics:                topics,
-		logger:                logger,
+		consumerOffsetFetcher:   consumerFetcher,
+		topicOffsetFetcher:      topicFetcher,
+		connectionResetDisabled: config.DisableMonitoringConnectionReset,
+		subscriptions:           map[string][]int32{},
+		topicsLock:              &sync.RWMutex{},
+		topics:                  topics,
+		logger:                  logger,
 	}
 }
 
@@ -133,6 +135,11 @@ func (m *consumerMonitor) run(ctx context.Context, subscriptionEvents chan *subs
 
 				log.Errorf("Fetching offsets failed %d times in a row. Consumer status data is stale.",
 					m.scheduler.failureCount)
+
+				if m.connectionResetDisabled {
+					m.clearConsumerStatus()
+					continue
+				}
 
 				// It's necessary to restart the connection due to:
 				// * bug producing broken pipe errors: https://github.com/Shopify/sarama/issues/1796;

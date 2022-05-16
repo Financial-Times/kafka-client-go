@@ -317,9 +317,10 @@ func TestConsumerMonitor_Workflow(t *testing.T) {
 	fetchHandlingInterval := 600 * time.Millisecond
 
 	config := ConsumerConfig{
-		ConsumerGroup:              testConsumerGroup,
-		OffsetFetchInterval:        fetchInterval,
-		OffsetFetchMaxFailureCount: 2,
+		ConsumerGroup:                    testConsumerGroup,
+		OffsetFetchInterval:              fetchInterval,
+		OffsetFetchMaxFailureCount:       2,
+		DisableMonitoringConnectionReset: true,
 	}
 
 	updates := []struct {

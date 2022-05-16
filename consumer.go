@@ -50,7 +50,13 @@ type ConsumerConfig struct {
 	// Note: A single failure will result in follow-up requests to be sent on
 	// shorter interval than the value of OffsetFetchInterval until successful.
 	OffsetFetchMaxFailureCount int
-	Options                    *sarama.Config
+	// Whether to disable the automatic reset of the sarama.ClusterAdmin
+	// monitoring connection upon exceeding the OffsetFetchMaxFailureCount threshold.
+	// Default value is false.
+	// Note: Resetting the connection is necessary for the current version of Sarama (1.33.0)
+	// due to numerous issues originating from the library. This flag is currently only used in tests.
+	DisableMonitoringConnectionReset bool
+	Options                          *sarama.Config
 }
 
 func NewConsumer(config ConsumerConfig, topics []*Topic, log *logger.UPPLogger) *Consumer {
