@@ -2,12 +2,10 @@ package kafka
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/Financial-Times/go-logger/v2"
@@ -136,13 +134,10 @@ func (m *consumerMonitor) run(ctx context.Context, subscriptionEvents chan *subs
 				log.Errorf("Fetching offsets failed %d times in a row. Consumer status data is stale.",
 					m.scheduler.failureCount)
 
-				if !errors.Is(err, syscall.EPIPE) {
-					m.clearConsumerStatus()
-					continue
-				}
-
-				// It's necessary to restart the connection on broken pipe errors due to a
-				// bug in the Sarama library: https://github.com/Shopify/sarama/issues/1796
+				// It's necessary to restart the connection due to:
+				// * bug producing broken pipe errors: https://github.com/Shopify/sarama/issues/1796;
+				// * consumer rebalancing causing coordinator errors;
+				// * other issues unknown at this point and time.
 				log.Info("Attempting to re-establish monitoring connection...")
 
 				consumerOffsetFetcher, topicOffsetFetcher, err := newConsumerGroupOffsetFetchers(m.connectionString)
