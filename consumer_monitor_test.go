@@ -307,7 +307,7 @@ func newMockBrokerWrapper(t *testing.T) *mockBrokerWrapper {
 func (w *mockBrokerWrapper) setOffsetFetchResponses(consumerOffsetResponse *sarama.MockOffsetFetchResponse, topicOffsetResponse *sarama.MockOffsetResponse) {
 	w.handlers["OffsetFetchRequest"] = consumerOffsetResponse
 	if topicOffsetResponse != nil {
-		w.handlers["OffsetRequest"] = topicOffsetResponse.SetVersion(1)
+		w.handlers["OffsetRequest"] = topicOffsetResponse
 	}
 	w.broker.SetHandlerByMap(w.handlers)
 }
@@ -317,9 +317,10 @@ func TestConsumerMonitor_Workflow(t *testing.T) {
 	fetchHandlingInterval := 600 * time.Millisecond
 
 	config := ConsumerConfig{
-		ConsumerGroup:              testConsumerGroup,
-		OffsetFetchInterval:        fetchInterval,
-		OffsetFetchMaxFailureCount: 2,
+		ConsumerGroup:                    testConsumerGroup,
+		OffsetFetchInterval:              fetchInterval,
+		OffsetFetchMaxFailureCount:       2,
+		DisableMonitoringConnectionReset: true,
 	}
 
 	updates := []struct {
