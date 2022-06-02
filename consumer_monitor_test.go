@@ -415,7 +415,7 @@ func TestConsumerMonitor_Workflow(t *testing.T) {
 		{
 			consumerOffsetResponse: sarama.NewMockOffsetFetchResponse(t).
 				SetOffset(testConsumerGroup, monitorTopic1, monitorPartition2, 350, "", 0).
-				SetOffset(testConsumerGroup, monitorTopic2, monitorPartition2, 0, "", 0),
+				SetOffset(testConsumerGroup, monitorTopic2, monitorPartition2, -1, "", 0),
 			topicOffsetResponse: sarama.NewMockOffsetResponse(t).
 				SetOffset(monitorTopic1, monitorPartition2, sarama.OffsetNewest, 380).
 				SetOffset(monitorTopic2, monitorPartition2, sarama.OffsetNewest, 240),
@@ -501,7 +501,7 @@ func TestConsumerMonitor_Workflow(t *testing.T) {
 		},
 		{
 			consumerOffsetResponse: sarama.NewMockOffsetFetchResponse(t).
-				SetOffset(testConsumerGroup, monitorTopic1, monitorPartition1, 0, "", 0),
+				SetOffset(testConsumerGroup, monitorTopic1, monitorPartition1, -1, "", 0),
 			topicOffsetResponse: sarama.NewMockOffsetResponse(t).
 				SetOffset(monitorTopic1, monitorPartition1, sarama.OffsetNewest, 1275),
 			statusError: fmt.Errorf("consumer is not healthy: " +

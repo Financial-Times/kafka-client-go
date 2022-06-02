@@ -272,12 +272,12 @@ func (m *consumerMonitor) updateConsumerStatus(fetchedOffsets map[string][]offse
 		for _, offset := range offsets {
 			// Only store the lag if it exceeds the configured threshold or is invalid.
 			// The next offset in the topic will always be greater than or equal to the last committed offset of the consumer.
-			// uncommittedOffsets flag is set to true in case the consumer group hasn't committed any offsets yet to prevent reporting wrong values to the client
+			// uncommittedOffsets flag is set to true in case the consumer group hasn't committed any offsets yet (returned value is -1) to prevent reporting wrong values to the client
 			lag := offset.Topic - offset.Consumer
 			if lag > topic.lagTolerance || lag < 0 {
 				lagState := partitionLagState{
 					currentLag:         lag,
-					uncommittedOffsets: offset.Consumer == 0,
+					uncommittedOffsets: offset.Consumer == -1,
 				}
 				topic.partitionLag[offset.Partition] = lagState
 			} else {
