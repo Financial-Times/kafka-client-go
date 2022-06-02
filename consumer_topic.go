@@ -11,7 +11,12 @@ type subscriptionEvent struct {
 type Topic struct {
 	Name         string
 	lagTolerance int64
-	partitionLag map[int32]int64
+	partitionLag map[int32]partitionLagState
+}
+
+type partitionLagState struct {
+	currentLag         int64
+	uncommittedOffsets bool
 }
 
 type TopicOption func(topic *Topic)
@@ -19,7 +24,7 @@ type TopicOption func(topic *Topic)
 func NewTopic(name string, opts ...TopicOption) *Topic {
 	t := &Topic{
 		Name:         name,
-		partitionLag: map[int32]int64{},
+		partitionLag: map[int32]partitionLagState{},
 	}
 
 	for _, opt := range opts {
