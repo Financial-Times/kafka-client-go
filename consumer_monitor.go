@@ -13,11 +13,11 @@ import (
 )
 
 const (
-	maxOffsetFetchInterval     = 10 * time.Minute
-	defaultOffsetFetchInterval = 3 * time.Minute
-
+	maxOffsetFetchInterval         = 10 * time.Minute
+	defaultOffsetFetchInterval     = 3 * time.Minute
 	maxOffsetFetchFailureCount     = 10
 	defaultOffsetFetchFailureCount = 5
+	uncommittedOffsetValue         = -1
 )
 
 type topicOffsetFetcher interface {
@@ -265,19 +265,24 @@ func (m *consumerMonitor) updateConsumerStatus(fetchedOffsets map[string][]offse
 		offsets, ok := fetchedOffsets[topic.Name]
 		if !ok {
 			// No active subscriptions for the given topic at the time.
-			topic.partitionLag = map[int32]int64{}
+			topic.partitionLag = make(map[int32]*int64)
 			continue
 		}
 
 		for _, offset := range offsets {
 			// Only store the lag if it exceeds the configured threshold or is invalid.
 			// The next offset in the topic will always be greater than or equal to the last committed offset of the consumer.
-			lag := offset.Topic - offset.Consumer
-			if lag > topic.lagTolerance || lag < 0 {
-				topic.partitionLag[offset.Partition] = lag
+			// uncommittedOffsets flag is set to true in case the consumer group hasn't committed any offsets yet (returned value is -1) to prevent reporting wrong values to the client
+			if offset.Consumer == uncommittedOffsetValue {
+				topic.partitionLag[offset.Partition] = nil
 			} else {
-				// Clear the latest lag entry to flag the partition as healthy.
-				delete(topic.partitionLag, offset.Partition)
+				lag := offset.Topic - offset.Consumer
+				if lag > topic.lagTolerance || lag < 0 {
+					topic.partitionLag[offset.Partition] = &lag
+				} else {
+					// Clear the latest lag entry to flag the partition as healthy.
+					delete(topic.partitionLag, offset.Partition)
+				}
 			}
 		}
 	}
@@ -291,7 +296,7 @@ func (m *consumerMonitor) clearConsumerStatus() {
 
 	m.unknownStatus = true
 	for _, topic := range m.topics {
-		topic.partitionLag = map[int32]int64{}
+		topic.partitionLag = make(map[int32]*int64)
 	}
 }
 
@@ -308,12 +313,15 @@ func (m *consumerMonitor) consumerStatus() error {
 	for _, topic := range m.topics {
 		for partition, lag := range topic.partitionLag {
 			var message string
-			if lag < 0 {
-				message = fmt.Sprintf("could not determine lag for partition %d of topic %q", partition, topic.Name)
+			if lag == nil {
+				message = fmt.Sprintf("could not determine lag for partition %d of topic %q due to uncompleted initial offset commit", partition, topic.Name)
 			} else {
-				message = fmt.Sprintf("consumer is lagging behind for partition %d of topic %q with %d messages", partition, topic.Name, lag)
+				if *lag < 0 {
+					message = fmt.Sprintf("could not determine lag for partition %d of topic %q", partition, topic.Name)
+				} else {
+					message = fmt.Sprintf("consumer is lagging behind for partition %d of topic %q with %d messages", partition, topic.Name, *lag)
+				}
 			}
-
 			statusMessages = append(statusMessages, message)
 		}
 	}

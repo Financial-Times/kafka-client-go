@@ -413,6 +413,17 @@ func TestConsumerMonitor_Workflow(t *testing.T) {
 				"consumer is lagging behind for partition 2 of topic \"testTopic2\" with 60 messages"),
 		},
 		{
+			consumerOffsetResponse: sarama.NewMockOffsetFetchResponse(t).
+				SetOffset(testConsumerGroup, monitorTopic1, monitorPartition2, 350, "", 0).
+				SetOffset(testConsumerGroup, monitorTopic2, monitorPartition2, -1, "", 0),
+			topicOffsetResponse: sarama.NewMockOffsetResponse(t).
+				SetOffset(monitorTopic1, monitorPartition2, sarama.OffsetNewest, 380).
+				SetOffset(monitorTopic2, monitorPartition2, sarama.OffsetNewest, 240),
+			statusError: fmt.Errorf("consumer is not healthy: " +
+				"consumer is lagging behind for partition 2 of topic \"testTopic\" with 30 messages ; " +
+				"could not determine lag for partition 2 of topic \"testTopic2\" due to uncompleted initial offset commit"),
+		},
+		{
 			subscription: &subscriptionEvent{
 				subscribed: false,
 				topic:      monitorTopic1,
@@ -487,6 +498,14 @@ func TestConsumerMonitor_Workflow(t *testing.T) {
 				SetOffset(monitorTopic1, monitorPartition1, sarama.OffsetNewest, 1275),
 			statusError: fmt.Errorf("consumer is not healthy: " +
 				"consumer is lagging behind for partition 1 of topic \"testTopic\" with 25 messages"),
+		},
+		{
+			consumerOffsetResponse: sarama.NewMockOffsetFetchResponse(t).
+				SetOffset(testConsumerGroup, monitorTopic1, monitorPartition1, -1, "", 0),
+			topicOffsetResponse: sarama.NewMockOffsetResponse(t).
+				SetOffset(monitorTopic1, monitorPartition1, sarama.OffsetNewest, 1275),
+			statusError: fmt.Errorf("consumer is not healthy: " +
+				"could not determine lag for partition 1 of topic \"testTopic\" due to uncompleted initial offset commit"),
 		},
 		{
 			consumerOffsetResponse: sarama.NewMockOffsetFetchResponse(t).
