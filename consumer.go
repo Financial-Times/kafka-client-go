@@ -22,6 +22,9 @@ const (
 	defaultConnectionRetryInterval = 1 * time.Minute
 )
 
+// LagTechnicalSummary is used as technical summary in consumer monitoring healthchecks.
+const LagTechnicalSummary string = "Messages awaiting handling exceed the configured lag tolerance. Check if Kafka consumer is stuck."
+
 // Consumer which will keep trying to reconnect to Kafka on a specified interval.
 // The underlying consumer group is created lazily when message listening is started.
 type Consumer struct {
