@@ -10,6 +10,7 @@ type subscriptionEvent struct {
 
 type Topic struct {
 	Name         string
+	hasReplica   bool
 	lagTolerance int64
 	partitionLag map[int32]*int64
 }
@@ -39,5 +40,13 @@ func NewTopic(name string, opts ...TopicOption) *Topic {
 func WithLagTolerance(tolerance int64) TopicOption {
 	return func(t *Topic) {
 		t.lagTolerance = tolerance
+	}
+}
+
+// WithReplica indicates that the topic is being replicated from another Kafka cluster in a new topic called "Topic.Name + Replica".
+// Default is false.
+func WithReplica() TopicOption {
+	return func(t *Topic) {
+		t.hasReplica = true
 	}
 }

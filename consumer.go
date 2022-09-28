@@ -20,6 +20,8 @@ var (
 const (
 	maxConnectionRetryInterval     = 5 * time.Minute
 	defaultConnectionRetryInterval = 1 * time.Minute
+
+	topicReplicaSuffix = "Replica"
 )
 
 // LagTechnicalSummary is used as technical summary in consumer monitoring healthchecks.
@@ -203,9 +205,13 @@ func (c *Consumer) Start(messageHandler func(message FTMessage)) {
 
 	handler := newConsumerHandler(subscriptions, messageHandler)
 
-	topics := make([]string, 0, len(c.topics))
+	topics := make([]string, 0, len(c.topics)*2)
 	for _, topic := range c.topics {
 		topics = append(topics, topic.Name)
+
+		if topic.hasReplica {
+			topics = append(topics, topic.Name+topicReplicaSuffix)
+		}
 	}
 
 	go c.consumeMessages(ctx, topics, handler)

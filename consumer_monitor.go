@@ -71,6 +71,14 @@ func newConsumerMonitor(config ConsumerConfig, consumerFetcher consumerOffsetFet
 		maxFailureCount = defaultOffsetFetchFailureCount
 	}
 
+	replicatedTopics := make([]*Topic, 0, len(topics))
+	for _, t := range topics {
+		if t.hasReplica {
+			replica := NewTopic(t.Name+topicReplicaSuffix, WithLagTolerance(t.lagTolerance))
+			replicatedTopics = append(replicatedTopics, replica)
+		}
+	}
+
 	return &consumerMonitor{
 		connectionString: config.BrokersConnectionString,
 		consumerGroup:    config.ConsumerGroup,
@@ -84,7 +92,7 @@ func newConsumerMonitor(config ConsumerConfig, consumerFetcher consumerOffsetFet
 		connectionResetDisabled: config.DisableMonitoringConnectionReset,
 		subscriptions:           map[string][]int32{},
 		topicsLock:              &sync.RWMutex{},
-		topics:                  topics,
+		topics:                  append(topics, replicatedTopics...),
 		logger:                  logger,
 	}
 }
