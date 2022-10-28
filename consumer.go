@@ -106,7 +106,7 @@ func (c *Consumer) consumeMessages(ctx context.Context, topics []string, handler
 //  4. Report a status error on MonitorCheck() calls.
 //
 // Close() calls will terminate both the message consumption and the consumer monitoring processes.
-func (c *Consumer) Start(messageHandler func(message FTMessage)) {
+func (c *Consumer) Start(messageHandler func(message Message)) {
 	ctx, cancel := context.WithCancel(context.Background())
 	subscriptions := make(chan *subscriptionEvent, 50)
 

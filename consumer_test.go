@@ -61,7 +61,7 @@ func TestKafkaConsumer_Start(t *testing.T) {
 	}
 
 	consumer := newTestConsumer(t, testTopic)
-	consumer.Start(func(msg FTMessage) {})
+	consumer.Start(func(msg Message) {})
 
 	require.NoError(t, consumer.ConnectivityCheck())
 	assert.NoError(t, consumer.Close())
@@ -203,7 +203,7 @@ func TestConsumer_Start(t *testing.T) {
 	var count int32
 	consumer := NewMockConsumer()
 
-	consumer.Start(func(msg FTMessage) {
+	consumer.Start(func(msg Message) {
 		atomic.AddInt32(&count, 1)
 	})
 
