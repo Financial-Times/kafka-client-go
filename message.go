@@ -37,10 +37,7 @@ type Message struct {
 func rawToMessage(message *sarama.ConsumerMessage) Message {
 	headers := map[string]string{}
 	for _, header := range message.Headers {
-		key := string(header.Key)
-		value := string(header.Value)
-
-		headers[key] = headers[value]
+		headers[string(header.Key)] = string(header.Value)
 	}
 
 	return Message{
