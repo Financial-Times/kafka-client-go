@@ -35,13 +35,11 @@ func NewMockProducer(t *testing.T, brokers string, topic string) *Producer {
 func TestProducer_SendMessage(t *testing.T) {
 	producer := NewMockProducer(t, testBrokers, testTopic)
 
-	msg := FTMessage{
-		Headers: map[string]string{
-			"X-Request-Id": "test",
-		},
-		Body: `{"foo":"bar"}`,
+	value := `{"foo":"bar"}`
+	headers := map[string]string{
+		"X-Request-Id": "test",
 	}
-	assert.NoError(t, producer.SendMessage(msg))
+	assert.NoError(t, producer.SendMessage("", value, headers))
 
 	assert.NoError(t, producer.Close())
 }
@@ -51,14 +49,12 @@ func TestProducer_SendMessage_NoConnection(t *testing.T) {
 		producerLock: &sync.RWMutex{},
 	}
 
-	msg := FTMessage{
-		Headers: map[string]string{
-			"X-Request-Id": "test",
-		},
-		Body: `{"foo":"bar"}`,
+	value := `{"foo":"bar"}`
+	headers := map[string]string{
+		"X-Request-Id": "test",
 	}
 
-	err := producer.SendMessage(msg)
+	err := producer.SendMessage("", value, headers)
 	assert.ErrorIs(t, err, ErrProducerNotConnected)
 }
 
@@ -101,13 +97,11 @@ func TestProducer_KafkaConnection(t *testing.T) {
 	producer := NewKafkaProducer(testTopic)
 	require.NoError(t, producer.ConnectivityCheck())
 
-	msg := FTMessage{
-		Headers: map[string]string{
-			"X-Request-Id": "test",
-		},
-		Body: `{"foo":"bar"}`,
+	value := `{"foo":"bar"}`
+	headers := map[string]string{
+		"X-Request-Id": "test",
 	}
-	assert.NoError(t, producer.SendMessage(msg))
+	assert.NoError(t, producer.SendMessage("", value, headers))
 
 	assert.NoError(t, producer.Close())
 }

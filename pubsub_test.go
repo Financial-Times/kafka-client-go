@@ -19,11 +19,6 @@ func TestE2EPubSub(t *testing.T) {
 	producer := NewKafkaProducer(e2eTestTopic)
 	require.NoError(t, producer.ConnectivityCheck())
 
-	producedMessages := []FTMessage{
-		NewFTMessage(map[string]string{}, "message 1"),
-		NewFTMessage(map[string]string{}, "message 2"),
-	}
-
 	consumedMessagesLock := &sync.RWMutex{}
 	consumedMessages := []Message{}
 
@@ -40,8 +35,25 @@ func TestE2EPubSub(t *testing.T) {
 
 	require.NoError(t, consumer.ConnectivityCheck())
 
+	producedMessages := []Message{
+		{
+			Key:   "id1",
+			Value: []byte(`{"data":"message 1"}`),
+			Headers: map[string]string{
+				"key1": "value1",
+			},
+		},
+		{
+			Key:   "id2",
+			Value: []byte(`{"data":"message 2"}`),
+			Headers: map[string]string{
+				"key2": "value2",
+				"key3": "value3",
+			},
+		},
+	}
 	for _, message := range producedMessages {
-		assert.NoError(t, producer.SendMessage(message))
+		assert.NoError(t, producer.SendMessage(message.Key, message.Value, message.Headers))
 	}
 
 	time.Sleep(time.Second) // Let message handling take place.
