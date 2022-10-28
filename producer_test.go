@@ -31,13 +31,11 @@ func newMockProducer(t *testing.T, brokers string, topic string) *Producer {
 func TestProducer_SendMessage(t *testing.T) {
 	producer := newMockProducer(t, testBrokers, testTopic)
 
-	msg := FTMessage{
-		Headers: map[string]string{
-			"X-Request-Id": "test",
-		},
-		Body: `{"foo":"bar"}`,
+	value := `{"foo":"bar"}`
+	headers := map[string]string{
+		"X-Request-Id": "test",
 	}
-	assert.NoError(t, producer.SendMessage(msg))
+	assert.NoError(t, producer.SendMessage("", value, headers))
 
 	assert.NoError(t, producer.Close())
 }
@@ -78,13 +76,11 @@ func TestProducer_KafkaConnection(t *testing.T) {
 	producer := newTestProducer(t, testTopic)
 	require.NoError(t, producer.ConnectivityCheck())
 
-	msg := FTMessage{
-		Headers: map[string]string{
-			"X-Request-Id": "test",
-		},
-		Body: `{"foo":"bar"}`,
+	value := `{"foo":"bar"}`
+	headers := map[string]string{
+		"X-Request-Id": "test",
 	}
-	assert.NoError(t, producer.SendMessage(msg))
+	assert.NoError(t, producer.SendMessage("", value, headers))
 
 	assert.NoError(t, producer.Close())
 }
