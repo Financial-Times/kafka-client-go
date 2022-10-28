@@ -34,7 +34,7 @@ type Message struct {
 	Headers Headers
 }
 
-func rawToMessage(message *sarama.ConsumerMessage) *Message {
+func rawToMessage(message *sarama.ConsumerMessage) Message {
 	headers := map[string]string{}
 	for _, header := range message.Headers {
 		key := string(header.Key)
@@ -43,7 +43,7 @@ func rawToMessage(message *sarama.ConsumerMessage) *Message {
 		headers[key] = headers[value]
 	}
 
-	return &Message{
+	return Message{
 		Key:     string(message.Key),
 		Value:   message.Value,
 		Headers: headers,

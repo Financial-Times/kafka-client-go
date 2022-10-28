@@ -25,9 +25,9 @@ func TestE2EPubSub(t *testing.T) {
 	}
 
 	consumedMessagesLock := &sync.RWMutex{}
-	consumedMessages := []FTMessage{}
+	consumedMessages := []Message{}
 
-	messageHandler := func(message FTMessage) {
+	messageHandler := func(message Message) {
 		consumedMessagesLock.Lock()
 		consumedMessages = append(consumedMessages, message)
 		consumedMessagesLock.Unlock()
