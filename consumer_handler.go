@@ -5,10 +5,10 @@ import "github.com/Shopify/sarama"
 // consumerHandler represents a Sarama consumer group consumer.
 type consumerHandler struct {
 	subscriptions chan *subscriptionEvent
-	handler       func(message FTMessage)
+	handler       func(message Message)
 }
 
-func newConsumerHandler(subscriptions chan *subscriptionEvent, handler func(message FTMessage)) *consumerHandler {
+func newConsumerHandler(subscriptions chan *subscriptionEvent, handler func(message Message)) *consumerHandler {
 	return &consumerHandler{
 		subscriptions: subscriptions,
 		handler:       handler,
@@ -46,8 +46,7 @@ func (c *consumerHandler) ConsumeClaim(session sarama.ConsumerGroupSession, clai
 	for {
 		select {
 		case message := <-claim.Messages():
-			ftMsg := rawToFTMessage(message.Value, topic)
-			c.handler(ftMsg)
+			c.handler(newMessage(message))
 			session.MarkMessage(message, "")
 
 		case <-session.Context().Done():

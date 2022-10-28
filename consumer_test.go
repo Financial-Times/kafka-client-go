@@ -342,7 +342,7 @@ func TestConsumer_Workflow(t *testing.T) {
 	var count int32
 	consumer := newMockConsumer()
 
-	consumer.Start(func(msg FTMessage) {
+	consumer.Start(func(msg Message) {
 		atomic.AddInt32(&count, 1)
 	})
 
