@@ -35,17 +35,26 @@ func (c *consumerHandler) ConsumeClaim(session sarama.ConsumerGroupSession, clai
 		topic:      topic,
 		partition:  partition,
 	}
+	defer func() {
+		c.subscriptions <- &subscriptionEvent{
+			subscribed: false,
+			topic:      topic,
+			partition:  partition,
+		}
+	}()
 
-	for message := range claim.Messages() {
-		ftMsg := rawToFTMessage(message.Value, topic)
-		c.handler(ftMsg)
-		session.MarkMessage(message, "")
+	for {
+		select {
+		case message, ok := <-claim.Messages():
+			if !ok {
+				return nil
+			}
+			ftMsg := rawToFTMessage(message.Value, topic)
+			c.handler(ftMsg)
+			session.MarkMessage(message, "")
+
+		case <-session.Context().Done():
+			return nil
+		}
 	}
-
-	c.subscriptions <- &subscriptionEvent{
-		topic:     topic,
-		partition: partition,
-	}
-
-	return nil
 }

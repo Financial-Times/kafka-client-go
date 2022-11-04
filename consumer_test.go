@@ -77,97 +77,107 @@ func TestKafkaConsumer_Start(t *testing.T) {
 	assert.NoError(t, consumer.Close())
 }
 
-type MockConsumerGroupClaim struct {
-	messages []*sarama.ConsumerMessage
+type mockConsumerGroupClaim struct {
+	messages chan *sarama.ConsumerMessage
 }
 
-func (c *MockConsumerGroupClaim) Topic() string {
+func (c *mockConsumerGroupClaim) Topic() string {
 	return ""
 }
 
-func (c *MockConsumerGroupClaim) Partition() int32 {
+func (c *mockConsumerGroupClaim) Partition() int32 {
 	return 0
 }
 
-func (c *MockConsumerGroupClaim) InitialOffset() int64 {
+func (c *mockConsumerGroupClaim) InitialOffset() int64 {
 	return 0
 }
 
-func (c *MockConsumerGroupClaim) HighWaterMarkOffset() int64 {
+func (c *mockConsumerGroupClaim) HighWaterMarkOffset() int64 {
 	return 0
 }
 
-func (c *MockConsumerGroupClaim) Messages() <-chan *sarama.ConsumerMessage {
-	outChan := make(chan *sarama.ConsumerMessage, len(c.messages))
-	defer close(outChan)
-
-	for _, v := range c.messages {
-		outChan <- v
-	}
-
-	return outChan
+func (c *mockConsumerGroupClaim) Messages() <-chan *sarama.ConsumerMessage {
+	return c.messages
 }
 
-type MockConsumerGroup struct {
+type mockConsumerGroup struct {
 	messages []*sarama.ConsumerMessage
 }
 
-func (cg *MockConsumerGroup) Errors() <-chan error {
+func (cg *mockConsumerGroup) Errors() <-chan error {
 	return make(chan error)
 }
 
-func (cg *MockConsumerGroup) Close() error {
+func (cg *mockConsumerGroup) Close() error {
 	return nil
 }
 
-func (cg *MockConsumerGroup) Pause(map[string][]int32) {}
+func (cg *mockConsumerGroup) Pause(map[string][]int32) {}
 
-func (cg *MockConsumerGroup) Resume(map[string][]int32) {}
+func (cg *mockConsumerGroup) Resume(map[string][]int32) {}
 
-func (cg *MockConsumerGroup) PauseAll() {}
+func (cg *mockConsumerGroup) PauseAll() {}
 
-func (cg *MockConsumerGroup) ResumeAll() {}
+func (cg *mockConsumerGroup) ResumeAll() {}
 
-func (cg *MockConsumerGroup) Consume(_ context.Context, _ []string, handler sarama.ConsumerGroupHandler) error {
-	for _, v := range cg.messages {
-		session := &MockConsumerGroupSession{}
-		claim := &MockConsumerGroupClaim{
-			messages: []*sarama.ConsumerMessage{v},
-		}
+func (cg *mockConsumerGroup) Consume(_ context.Context, _ []string, handler sarama.ConsumerGroupHandler) error {
+	messages := make(chan *sarama.ConsumerMessage, len(cg.messages))
+	for _, message := range cg.messages {
+		messages <- message
+	}
+	defer close(messages)
 
-		_ = handler.ConsumeClaim(session, claim)
+	ctx, cancel := context.WithCancel(context.Background())
+	session := &mockConsumerGroupSession{
+		ctx: ctx,
+	}
+	claim := &mockConsumerGroupClaim{
+		messages: messages,
 	}
 
-	// We block here to simulate the behavior of the library
-	c := make(chan struct{})
-	<-c
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		_ = handler.ConsumeClaim(session, claim)
+	}()
+
+	// Wait for message processing.
+	time.Sleep(time.Second)
+
+	cancel()
+	wg.Wait()
+
 	return nil
 }
 
-type MockConsumerGroupSession struct{}
+type mockConsumerGroupSession struct {
+	ctx context.Context
+}
 
-func (m *MockConsumerGroupSession) Claims() map[string][]int32 {
+func (m *mockConsumerGroupSession) Claims() map[string][]int32 {
 	return make(map[string][]int32)
 }
 
-func (m *MockConsumerGroupSession) MemberID() string {
+func (m *mockConsumerGroupSession) MemberID() string {
 	return ""
 }
 
-func (m *MockConsumerGroupSession) GenerationID() int32 {
+func (m *mockConsumerGroupSession) GenerationID() int32 {
 	return 1
 }
 
-func (m *MockConsumerGroupSession) MarkOffset(string, int32, int64, string) {}
+func (m *mockConsumerGroupSession) MarkOffset(string, int32, int64, string) {}
 
-func (m *MockConsumerGroupSession) Commit() {}
+func (m *mockConsumerGroupSession) Commit() {}
 
-func (m *MockConsumerGroupSession) ResetOffset(string, int32, int64, string) {}
+func (m *mockConsumerGroupSession) ResetOffset(string, int32, int64, string) {}
 
-func (m *MockConsumerGroupSession) MarkMessage(*sarama.ConsumerMessage, string) {}
+func (m *mockConsumerGroupSession) MarkMessage(*sarama.ConsumerMessage, string) {}
 
-func (m *MockConsumerGroupSession) Context() context.Context {
-	return context.Background()
+func (m *mockConsumerGroupSession) Context() context.Context {
+	return m.ctx
 }
 
 func NewMockConsumer() *Consumer {
@@ -184,7 +194,7 @@ func NewMockConsumer() *Consumer {
 			},
 		},
 		consumerGroupLock: &sync.RWMutex{},
-		consumerGroup: &MockConsumerGroup{
+		consumerGroup: &mockConsumerGroup{
 			messages: messages,
 		},
 		monitorLock: &sync.RWMutex{},
