@@ -16,7 +16,7 @@ func TestE2EPubSub(t *testing.T) {
 
 	const e2eTestTopic = "e2eTestTopic"
 
-	producer := NewKafkaProducer(e2eTestTopic)
+	producer := newTestProducer(t, e2eTestTopic)
 	require.NoError(t, producer.ConnectivityCheck())
 
 	producedMessages := []FTMessage{
@@ -41,9 +41,9 @@ func TestE2EPubSub(t *testing.T) {
 		consumedMessagesLock.Unlock()
 	}
 
-	consumer := NewKafkaConsumer(e2eTestTopic)
+	consumer := newTestConsumer(t, e2eTestTopic)
 
-	go consumer.Start(messageHandler)
+	consumer.Start(messageHandler)
 	time.Sleep(5 * time.Second) // Let partition claiming take place.
 
 	require.NoError(t, consumer.ConnectivityCheck())

@@ -22,16 +22,8 @@ func TestConsumerGroup_KafkaConnection(t *testing.T) {
 		t.Skip("Skipping test as it requires a connection to Kafka.")
 	}
 
-	config := ConsumerConfig{
-		BrokersConnectionString: testBrokers,
-		ConsumerGroup:           testConsumerGroup,
-		Options:                 DefaultConsumerOptions(),
-	}
-
-	consumerGroup, err := newConsumerGroup(config)
-	require.NoError(t, err)
-
-	assert.NoError(t, consumerGroup.Close())
+	consumer := newTestConsumer(t, testTopic)
+	assert.NoError(t, consumer.Close())
 }
 
 func TestConsumer_InvalidConnection(t *testing.T) {
@@ -41,25 +33,26 @@ func TestConsumer_InvalidConnection(t *testing.T) {
 			BrokersConnectionString: "unknown:9092",
 			ConsumerGroup:           testConsumerGroup,
 		},
-		topics:            []*Topic{NewTopic(testTopic)},
-		consumerGroupLock: &sync.RWMutex{},
-		logger:            log,
+		topics: []*Topic{NewTopic(testTopic)},
+		logger: log,
 	}
 
 	assert.Error(t, consumer.ConnectivityCheck())
 }
 
-func NewKafkaConsumer(topic string) *Consumer {
+func newTestConsumer(t *testing.T, topic string) *Consumer {
 	log := logger.NewUPPLogger("test", "INFO")
 	config := ConsumerConfig{
 		BrokersConnectionString: testBrokers,
 		ConsumerGroup:           testConsumerGroup,
-		ConnectionRetryInterval: time.Second,
 		Options:                 DefaultConsumerOptions(),
 	}
 	topics := []*Topic{NewTopic(topic)}
 
-	return NewConsumer(config, topics, log)
+	consumer, err := NewConsumer(config, topics, log)
+	require.NoError(t, err)
+
+	return consumer
 }
 
 func TestKafkaConsumer_Start(t *testing.T) {
@@ -67,13 +60,10 @@ func TestKafkaConsumer_Start(t *testing.T) {
 		t.Skip("Skipping test as it requires a connection to Kafka.")
 	}
 
-	consumer := NewKafkaConsumer(testTopic)
-
-	go consumer.Start(func(msg FTMessage) {})
-	time.Sleep(5 * time.Second)
+	consumer := newTestConsumer(t, testTopic)
+	consumer.Start(func(msg FTMessage) {})
 
 	require.NoError(t, consumer.ConnectivityCheck())
-
 	assert.NoError(t, consumer.Close())
 }
 
@@ -193,11 +183,9 @@ func NewMockConsumer() *Consumer {
 				Name: testTopic,
 			},
 		},
-		consumerGroupLock: &sync.RWMutex{},
 		consumerGroup: &mockConsumerGroup{
 			messages: messages,
 		},
-		monitorLock: &sync.RWMutex{},
 		monitor: &consumerMonitor{
 			subscriptions:         map[string][]int32{},
 			consumerOffsetFetcher: &consumerOffsetFetcherMock{},

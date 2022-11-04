@@ -45,10 +45,7 @@ func (c *consumerHandler) ConsumeClaim(session sarama.ConsumerGroupSession, clai
 
 	for {
 		select {
-		case message, ok := <-claim.Messages():
-			if !ok {
-				return nil
-			}
+		case message := <-claim.Messages():
 			ftMsg := rawToFTMessage(message.Value, topic)
 			c.handler(ftMsg)
 			session.MarkMessage(message, "")

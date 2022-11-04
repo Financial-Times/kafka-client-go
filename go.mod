@@ -1,4 +1,4 @@
-module github.com/Financial-Times/kafka-client-go/v3
+module github.com/Financial-Times/kafka-client-go/v4
 
 go 1.18
 

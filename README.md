@@ -15,12 +15,12 @@ Attempting to consume or produce messages or to check connectivity will fail if 
 
 The library is NOT using Zookeeper to connect to Kafka under the hood.
 
-## Usage
+## Usage TODO
 
 Importing:
 
 ```go
-    import "github.com/Financial-Times/kafka-client-go/v3"
+    import "github.com/Financial-Times/kafka-client-go/v4"
 ```
 
 ### Producer

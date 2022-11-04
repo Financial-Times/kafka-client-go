@@ -3,11 +3,8 @@ package kafka
 import (
 	"net/http/httptest"
 	"strings"
-	"sync"
 	"testing"
-	"time"
 
-	"github.com/Financial-Times/go-logger/v2"
 	"github.com/Shopify/sarama/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -18,7 +15,7 @@ const (
 	testTopic   = "testTopic"
 )
 
-func NewMockProducer(t *testing.T, brokers string, topic string) *Producer {
+func newMockProducer(t *testing.T, brokers string, topic string) *Producer {
 	producer := mocks.NewSyncProducer(t, nil)
 	producer.ExpectSendMessageAndSucceed()
 
@@ -27,13 +24,12 @@ func NewMockProducer(t *testing.T, brokers string, topic string) *Producer {
 			BrokersConnectionString: brokers,
 			Topic:                   topic,
 		},
-		producerLock: &sync.RWMutex{},
-		producer:     producer,
+		producer: producer,
 	}
 }
 
 func TestProducer_SendMessage(t *testing.T) {
-	producer := NewMockProducer(t, testBrokers, testTopic)
+	producer := newMockProducer(t, testBrokers, testTopic)
 
 	msg := FTMessage{
 		Headers: map[string]string{
@@ -44,22 +40,6 @@ func TestProducer_SendMessage(t *testing.T) {
 	assert.NoError(t, producer.SendMessage(msg))
 
 	assert.NoError(t, producer.Close())
-}
-
-func TestProducer_SendMessage_NoConnection(t *testing.T) {
-	producer := Producer{
-		producerLock: &sync.RWMutex{},
-	}
-
-	msg := FTMessage{
-		Headers: map[string]string{
-			"X-Request-Id": "test",
-		},
-		Body: `{"foo":"bar"}`,
-	}
-
-	err := producer.SendMessage(msg)
-	assert.ErrorIs(t, err, ErrProducerNotConnected)
 }
 
 func TestProducer_InvalidConnection(t *testing.T) {
@@ -73,22 +53,19 @@ func TestProducer_InvalidConnection(t *testing.T) {
 		Options:                 DefaultProducerOptions(),
 	}
 
-	_, err := newProducer(config)
+	_, err := NewProducer(config)
 	assert.Error(t, err)
 }
 
-func NewKafkaProducer(topic string) *Producer {
-	log := logger.NewUPPLogger("test", "INFO")
+func newTestProducer(t *testing.T, topic string) *Producer {
 	config := ProducerConfig{
 		BrokersConnectionString: testBrokers,
-		ConnectionRetryInterval: time.Second,
 		Topic:                   topic,
 		Options:                 DefaultProducerOptions(),
 	}
 
-	producer := NewProducer(config, log)
-
-	time.Sleep(time.Second) // Let connection take place.
+	producer, err := NewProducer(config)
+	require.NoError(t, err)
 
 	return producer
 }
@@ -98,7 +75,7 @@ func TestProducer_KafkaConnection(t *testing.T) {
 		t.Skip("Skipping test as it requires a connection to Kafka.")
 	}
 
-	producer := NewKafkaProducer(testTopic)
+	producer := newTestProducer(t, testTopic)
 	require.NoError(t, producer.ConnectivityCheck())
 
 	msg := FTMessage{
