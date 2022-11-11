@@ -20,8 +20,16 @@ func TestE2EPubSub(t *testing.T) {
 	require.NoError(t, producer.ConnectivityCheck())
 
 	producedMessages := []FTMessage{
-		NewFTMessage(map[string]string{}, "message 1"),
-		NewFTMessage(map[string]string{}, "message 2"),
+		{
+			Headers: map[string]string{},
+			Body:    "message 1",
+			Topic:   e2eTestTopic,
+		},
+		{
+			Headers: map[string]string{},
+			Body:    "message 2",
+			Topic:   e2eTestTopic,
+		},
 	}
 
 	consumedMessagesLock := &sync.RWMutex{}
