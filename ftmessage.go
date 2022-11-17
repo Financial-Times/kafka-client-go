@@ -9,6 +9,7 @@ import (
 type FTMessage struct {
 	Headers map[string]string
 	Body    string
+	Topic   string
 }
 
 func NewFTMessage(headers map[string]string, body string) FTMessage {
@@ -34,14 +35,15 @@ func (m *FTMessage) Build() string {
 	return buffer.String()
 }
 
-func rawToFTMessage(msg []byte) FTMessage {
-	ftMsg := FTMessage{}
+func rawToFTMessage(msg []byte, topic string) FTMessage {
 	raw := string(msg)
 
-	doubleNewLineStartIndex := getHeaderSectionEndingIndex(string(raw[:]))
-	ftMsg.Headers = parseHeaders(string(raw[:doubleNewLineStartIndex]))
-	ftMsg.Body = strings.TrimSpace(string(raw[doubleNewLineStartIndex:]))
-	return ftMsg
+	doubleNewLineStartIndex := getHeaderSectionEndingIndex(raw[:])
+	return FTMessage{
+		Headers: parseHeaders(raw[:doubleNewLineStartIndex]),
+		Body:    strings.TrimSpace(raw[doubleNewLineStartIndex:]),
+		Topic:   topic,
+	}
 }
 
 var re = regexp.MustCompile("[\\w-]*:[\\w\\-:/.+;= ]*")

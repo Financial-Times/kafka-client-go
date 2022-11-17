@@ -37,7 +37,7 @@ func (c *consumerHandler) ConsumeClaim(session sarama.ConsumerGroupSession, clai
 	}
 
 	for message := range claim.Messages() {
-		ftMsg := rawToFTMessage(message.Value)
+		ftMsg := rawToFTMessage(message.Value, topic)
 		c.handler(ftMsg)
 		session.MarkMessage(message, "")
 	}
