@@ -111,6 +111,8 @@ func (c *Consumer) Start(messageHandler func(message FTMessage)) {
 		topics = append(topics, topic.Name)
 	}
 
+	c.logger.WithField("topics", topics).Info("Starting consumer...")
+
 	go c.consumeMessages(ctx, topics, handler)
 	go c.monitor.run(ctx, subscriptions)
 
@@ -120,8 +122,6 @@ func (c *Consumer) Start(messageHandler func(message FTMessage)) {
 		// Terminate the message consumption and consumer monitoring.
 		cancel()
 	}()
-
-	c.logger.Info("Starting consumer...")
 }
 
 // Close closes the connection to Kafka.
