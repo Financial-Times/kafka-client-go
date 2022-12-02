@@ -12,6 +12,8 @@ import (
 	"github.com/Shopify/sarama"
 )
 
+var ErrUnknownConsumerStatus = fmt.Errorf("consumer status is unknown")
+
 const (
 	maxOffsetFetchInterval         = 10 * time.Minute
 	defaultOffsetFetchInterval     = 3 * time.Minute
@@ -305,7 +307,7 @@ func (m *consumerMonitor) consumerStatus() error {
 	defer m.topicsLock.RUnlock()
 
 	if m.unknownStatus {
-		return fmt.Errorf("consumer status is unknown")
+		return ErrUnknownConsumerStatus
 	}
 
 	var statusMessages []string

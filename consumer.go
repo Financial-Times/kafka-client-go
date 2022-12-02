@@ -9,21 +9,35 @@ import (
 
 	"github.com/Financial-Times/go-logger/v2"
 	"github.com/Shopify/sarama"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/kafka"
+	"github.com/aws/aws-sdk-go-v2/service/kafka/types"
 )
 
 // LagTechnicalSummary is used as technical summary in consumer monitoring healthchecks.
 const LagTechnicalSummary string = "Messages awaiting handling exceed the configured lag tolerance. Check if Kafka consumer is stuck."
 
+const (
+	clusterConfigTimeout      = 5 * time.Second
+	clusterDescriptionTimeout = 10 * time.Second
+)
+
+type clusterDescriber interface {
+	DescribeClusterV2(ctx context.Context, input *kafka.DescribeClusterV2Input, optFns ...func(*kafka.Options)) (*kafka.DescribeClusterV2Output, error)
+}
+
 type Consumer struct {
-	config        ConsumerConfig
-	topics        []*Topic
-	consumerGroup sarama.ConsumerGroup
-	monitor       *consumerMonitor
-	logger        *logger.UPPLogger
-	closed        chan struct{}
+	config           ConsumerConfig
+	topics           []*Topic
+	consumerGroup    sarama.ConsumerGroup
+	monitor          *consumerMonitor
+	clusterDescriber clusterDescriber
+	logger           *logger.UPPLogger
+	closed           chan struct{}
 }
 
 type ConsumerConfig struct {
+	ClusterArn              *string
 	BrokersConnectionString string
 	ConsumerGroup           string
 	// Time interval between each offset fetching request.
@@ -43,24 +57,35 @@ type ConsumerConfig struct {
 	Options                          *sarama.Config
 }
 
-func NewConsumer(config ConsumerConfig, topics []*Topic, log *logger.UPPLogger) (*Consumer, error) {
-	consumerGroup, err := newConsumerGroup(config)
+func NewConsumer(cfg ConsumerConfig, topics []*Topic, log *logger.UPPLogger) (*Consumer, error) {
+	consumerGroup, err := newConsumerGroup(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("creating consumer group: %w", err)
 	}
 
-	consumerFetcher, topicFetcher, err := newConsumerGroupOffsetFetchers(config.BrokersConnectionString)
+	consumerFetcher, topicFetcher, err := newConsumerGroupOffsetFetchers(cfg.BrokersConnectionString)
 	if err != nil {
 		return nil, fmt.Errorf("creating consumer offset fetchers: %w", err)
 	}
 
+	var describer clusterDescriber
+	if cfg.ClusterArn != nil {
+		describer, err = newClusterDescriber()
+		if err != nil {
+			return nil, fmt.Errorf("creating cluster describer: %w", err)
+		}
+	} else {
+		log.Warning("Cluster ARN not provided! Maintenance may cause false positive consumer monitor errors")
+	}
+
 	consumer := &Consumer{
-		config:        config,
-		topics:        topics,
-		logger:        log,
-		consumerGroup: consumerGroup,
-		monitor:       newConsumerMonitor(config, consumerFetcher, topicFetcher, topics, log),
-		closed:        make(chan struct{}),
+		config:           cfg,
+		topics:           topics,
+		logger:           log,
+		consumerGroup:    consumerGroup,
+		monitor:          newConsumerMonitor(cfg, consumerFetcher, topicFetcher, topics, log),
+		clusterDescriber: describer,
+		closed:           make(chan struct{}),
 	}
 
 	return consumer, nil
@@ -139,12 +164,12 @@ func (c *Consumer) Close() error {
 
 // ConnectivityCheck checks whether a connection to Kafka can be established.
 func (c *Consumer) ConnectivityCheck() error {
-	config := ConsumerConfig{
+	cfg := ConsumerConfig{
 		BrokersConnectionString: c.config.BrokersConnectionString,
 		ConsumerGroup:           fmt.Sprintf("healthcheck-%d", rand.Intn(100)),
 		Options:                 c.config.Options,
 	}
-	consumerGroup, err := newConsumerGroup(config)
+	consumerGroup, err := newConsumerGroup(cfg)
 	if err != nil {
 		return err
 	}
@@ -154,9 +179,42 @@ func (c *Consumer) ConnectivityCheck() error {
 	return nil
 }
 
+func (c *Consumer) isMaintenanceOngoing() (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), clusterDescriptionTimeout)
+	defer cancel()
+
+	cluster, err := c.clusterDescriber.DescribeClusterV2(ctx, &kafka.DescribeClusterV2Input{
+		ClusterArn: c.config.ClusterArn,
+	})
+	if err != nil {
+		return false, err
+	}
+
+	return cluster.ClusterInfo.State == types.ClusterStateMaintenance, nil
+}
+
 // MonitorCheck checks whether the consumer group is lagging behind when reading messages.
 func (c *Consumer) MonitorCheck() error {
-	return c.monitor.consumerStatus()
+	err := c.monitor.consumerStatus()
+	if err != ErrUnknownConsumerStatus || c.config.ClusterArn == nil {
+		return err
+	}
+
+	ongoingMaintenance, err := c.isMaintenanceOngoing()
+	if err != nil {
+		return fmt.Errorf("cluster status is unknown: %w", err)
+	}
+
+	if ongoingMaintenance {
+		// Skip unknown status errors until the cluster is back to 'ACTIVE' state.
+		//
+		// During maintenance all brokers are being failed over from one at a time.
+		// This may trigger frequent resets of the offset fetchers connection and
+		// in turn cause false positive alerts for unknown status.
+		return nil
+	}
+
+	return ErrUnknownConsumerStatus
 }
 
 func newConsumerGroup(config ConsumerConfig) (sarama.ConsumerGroup, error) {
@@ -184,11 +242,23 @@ func newConsumerGroupOffsetFetchers(brokerConnectionString string) (consumerOffs
 	return admin, client, nil
 }
 
+func newClusterDescriber() (clusterDescriber, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), clusterConfigTimeout)
+	defer cancel()
+
+	cfg, err := config.LoadDefaultConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return kafka.NewFromConfig(cfg), nil
+}
+
 // DefaultConsumerOptions returns a new sarama configuration with predefined default settings.
 func DefaultConsumerOptions() *sarama.Config {
-	config := sarama.NewConfig()
-	config.Consumer.Offsets.Initial = sarama.OffsetNewest
-	config.Consumer.MaxProcessingTime = 10 * time.Second
-	config.Consumer.Return.Errors = true
-	return config
+	cfg := sarama.NewConfig()
+	cfg.Consumer.Offsets.Initial = sarama.OffsetNewest
+	cfg.Consumer.MaxProcessingTime = 10 * time.Second
+	cfg.Consumer.Return.Errors = true
+	return cfg
 }
