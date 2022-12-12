@@ -70,8 +70,14 @@ func (c *Consumer) consumeMessages(ctx context.Context, topics []string, handler
 	log := c.logger.WithField("process", "Consumer")
 
 	go func() {
-		for err := range c.consumerGroup.Errors() {
-			log.WithError(err).Error("Error consuming message")
+		for {
+			select {
+			case <-ctx.Done():
+				return
+
+			case err := <-c.consumerGroup.Errors():
+				log.WithError(err).Error("Error consuming message")
+			}
 		}
 	}()
 
@@ -83,7 +89,7 @@ func (c *Consumer) consumeMessages(ctx context.Context, topics []string, handler
 
 		default:
 			if err := c.consumerGroup.Consume(ctx, topics, handler); err != nil {
-				log.WithError(err).Error("Error occurred during consumer group lifecycle")
+				log.WithError(err).Warn("Error occurred during consumer group lifecycle")
 			}
 		}
 	}

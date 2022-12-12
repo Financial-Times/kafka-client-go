@@ -124,7 +124,7 @@ func (m *consumerMonitor) run(ctx context.Context, subscriptionEvents chan *subs
 
 			offsets, err := m.fetchOffsets()
 			if err != nil {
-				log.WithError(err).Error("Failed to fetch consumer offsets")
+				log.WithError(err).Warn("Failed to fetch consumer offsets")
 
 				m.scheduler.ticker.Reset(m.scheduler.shortenedInterval)
 
@@ -133,7 +133,7 @@ func (m *consumerMonitor) run(ctx context.Context, subscriptionEvents chan *subs
 					continue
 				}
 
-				log.Errorf("Fetching offsets failed %d times in a row. Consumer status data is stale.",
+				log.Warnf("Fetching offsets failed %d times in a row. Consumer status data is stale.",
 					m.scheduler.failureCount)
 
 				if m.connectionResetDisabled {
@@ -149,7 +149,7 @@ func (m *consumerMonitor) run(ctx context.Context, subscriptionEvents chan *subs
 
 				consumerOffsetFetcher, topicOffsetFetcher, err := newConsumerGroupOffsetFetchers(m.connectionString)
 				if err != nil {
-					log.WithError(err).Warn("Failed to establish new monitoring connection")
+					log.WithError(err).Error("Failed to establish new monitoring connection")
 
 					m.clearConsumerStatus()
 					continue
