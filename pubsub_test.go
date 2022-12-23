@@ -42,11 +42,10 @@ func TestE2EPubSub(t *testing.T) {
 	}
 
 	consumer := newTestConsumer(t, e2eTestTopic)
+	require.NoError(t, consumer.ConnectivityCheck())
 
 	consumer.Start(messageHandler)
 	time.Sleep(5 * time.Second) // Let partition claiming take place.
-
-	require.NoError(t, consumer.ConnectivityCheck())
 
 	for _, message := range producedMessages {
 		assert.NoError(t, producer.SendMessage(message))
