@@ -61,7 +61,7 @@ func (p *Producer) ConnectivityCheck() error {
 	producer, err := newProducer(p.config)
 	if err != nil {
 		if p.config.ClusterArn != nil {
-			return checkClusterAvailability(err, p.clusterDescriber, p.config.ClusterArn)
+			return verifyHealthErrorSeverity(err, p.clusterDescriber, p.config.ClusterArn)
 		}
 
 		return err
