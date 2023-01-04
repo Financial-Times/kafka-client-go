@@ -33,7 +33,7 @@ func newClusterDescriber() (clusterDescriber, error) {
 
 // Verifies whether the Kafka cluster is available or not.
 // False positive healthcheck errors are being ignored during maintenance windows.
-func checkClusterAvailability(healthErr error, describer clusterDescriber, arn *string) error {
+func verifyHealthErrorSeverity(healthErr error, describer clusterDescriber, arn *string) error {
 	state, stateErr := retrieveClusterState(describer, arn)
 	if stateErr != nil {
 		return fmt.Errorf("cluster status is unknown: %w", stateErr)
