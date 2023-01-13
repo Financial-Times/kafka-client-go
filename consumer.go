@@ -15,15 +15,17 @@ import (
 const LagTechnicalSummary string = "Messages awaiting handling exceed the configured lag tolerance. Check if Kafka consumer is stuck."
 
 type Consumer struct {
-	config        ConsumerConfig
-	topics        []*Topic
-	consumerGroup sarama.ConsumerGroup
-	monitor       *consumerMonitor
-	logger        *logger.UPPLogger
-	closed        chan struct{}
+	config           ConsumerConfig
+	topics           []*Topic
+	consumerGroup    sarama.ConsumerGroup
+	monitor          *consumerMonitor
+	clusterDescriber clusterDescriber
+	logger           *logger.UPPLogger
+	closed           chan struct{}
 }
 
 type ConsumerConfig struct {
+	ClusterArn              *string
 	BrokersConnectionString string
 	ConsumerGroup           string
 	// Time interval between each offset fetching request.
@@ -54,13 +56,24 @@ func NewConsumer(config ConsumerConfig, topics []*Topic, log *logger.UPPLogger) 
 		return nil, fmt.Errorf("creating consumer offset fetchers: %w", err)
 	}
 
+	var describer clusterDescriber
+	if config.ClusterArn != nil {
+		describer, err = newClusterDescriber()
+		if err != nil {
+			return nil, fmt.Errorf("creating cluster describer: %w", err)
+		}
+	} else {
+		log.Warning("Cluster ARN not provided! Maintenance may cause false positive consumer errors")
+	}
+
 	consumer := &Consumer{
-		config:        config,
-		topics:        topics,
-		logger:        log,
-		consumerGroup: consumerGroup,
-		monitor:       newConsumerMonitor(config, consumerFetcher, topicFetcher, topics, log),
-		closed:        make(chan struct{}),
+		config:           config,
+		topics:           topics,
+		logger:           log,
+		consumerGroup:    consumerGroup,
+		monitor:          newConsumerMonitor(config, consumerFetcher, topicFetcher, topics, log),
+		clusterDescriber: describer,
+		closed:           make(chan struct{}),
 	}
 
 	return consumer, nil
@@ -146,6 +159,10 @@ func (c *Consumer) ConnectivityCheck() error {
 	}
 	consumerGroup, err := newConsumerGroup(config)
 	if err != nil {
+		if c.config.ClusterArn != nil {
+			return verifyHealthErrorSeverity(err, c.clusterDescriber, c.config.ClusterArn)
+		}
+
 		return err
 	}
 
@@ -156,7 +173,16 @@ func (c *Consumer) ConnectivityCheck() error {
 
 // MonitorCheck checks whether the consumer group is lagging behind when reading messages.
 func (c *Consumer) MonitorCheck() error {
-	return c.monitor.consumerStatus()
+	err := c.monitor.consumerStatus()
+	if err != nil {
+		if err == ErrUnknownConsumerStatus && c.config.ClusterArn != nil {
+			return verifyHealthErrorSeverity(err, c.clusterDescriber, c.config.ClusterArn)
+		}
+
+		return err
+	}
+
+	return nil
 }
 
 func newConsumerGroup(config ConsumerConfig) (sarama.ConsumerGroup, error) {

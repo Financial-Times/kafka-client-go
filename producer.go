@@ -8,11 +8,13 @@ import (
 )
 
 type Producer struct {
-	config   ProducerConfig
-	producer sarama.SyncProducer
+	config           ProducerConfig
+	producer         sarama.SyncProducer
+	clusterDescriber clusterDescriber
 }
 
 type ProducerConfig struct {
+	ClusterArn              *string
 	BrokersConnectionString string
 	Topic                   string
 	Options                 *sarama.Config
@@ -24,9 +26,18 @@ func NewProducer(config ProducerConfig) (*Producer, error) {
 		return nil, fmt.Errorf("creating producer: %w", err)
 	}
 
+	var describer clusterDescriber
+	if config.ClusterArn != nil {
+		describer, err = newClusterDescriber()
+		if err != nil {
+			return nil, fmt.Errorf("creating cluster describer: %w", err)
+		}
+	}
+
 	return &Producer{
-		config:   config,
-		producer: producer,
+		config:           config,
+		producer:         producer,
+		clusterDescriber: describer,
 	}, nil
 }
 
@@ -49,6 +60,10 @@ func (p *Producer) Close() error {
 func (p *Producer) ConnectivityCheck() error {
 	producer, err := newProducer(p.config)
 	if err != nil {
+		if p.config.ClusterArn != nil {
+			return verifyHealthErrorSeverity(err, p.clusterDescriber, p.config.ClusterArn)
+		}
+
 		return err
 	}
 
