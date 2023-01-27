@@ -10,6 +10,14 @@ import (
 	"github.com/Shopify/sarama"
 )
 
+type ValidationError struct {
+	err error
+}
+
+func (e *ValidationError) Error() string {
+	return fmt.Sprintf("validating message: %s", e.err)
+}
+
 type messageValidator interface {
 	Validate(schemaName string, schemaVersion int64, payload interface{}) error
 }
@@ -90,7 +98,7 @@ func (p *Producer) SendMessage(key string, value interface{}, headers Headers) e
 	// Validate the message if schema is configured.
 	if p.config.SchemaRegistry != "" {
 		if err := p.validateMessage(value, headers); err != nil {
-			return fmt.Errorf("validating message: %w", err)
+			return &ValidationError{err: err}
 		}
 	}
 
