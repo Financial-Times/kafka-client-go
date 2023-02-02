@@ -19,16 +19,23 @@ type clusterDescriber interface {
 	DescribeClusterV2(ctx context.Context, input *kafka.DescribeClusterV2Input, optFns ...func(*kafka.Options)) (*kafka.DescribeClusterV2Output, error)
 }
 
-func newClusterDescriber() (clusterDescriber, error) {
+func newClusterDescriber(arn *string) (clusterDescriber, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), clusterConfigTimeout)
 	defer cancel()
 
 	cfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("loading config: %w", err)
 	}
 
-	return kafka.NewFromConfig(cfg), nil
+	client := kafka.NewFromConfig(cfg)
+
+	// Ensure the client is properly configured.
+	if _, err = retrieveClusterState(client, arn); err != nil {
+		return nil, fmt.Errorf("retrieving cluster state: %w", err)
+	}
+
+	return client, nil
 }
 
 // Verifies whether the Kafka cluster is available or not.

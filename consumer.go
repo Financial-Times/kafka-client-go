@@ -58,7 +58,7 @@ func NewConsumer(config ConsumerConfig, topics []*Topic, log *logger.UPPLogger) 
 
 	var describer clusterDescriber
 	if config.ClusterArn != nil {
-		describer, err = newClusterDescriber()
+		describer, err = newClusterDescriber(config.ClusterArn)
 		if err != nil {
 			return nil, fmt.Errorf("creating cluster describer: %w", err)
 		}
