@@ -3,7 +3,6 @@ package kafka
 import (
 	"context"
 	"fmt"
-	"math/rand"
 	"strings"
 	"time"
 
@@ -46,7 +45,13 @@ type ConsumerConfig struct {
 }
 
 func NewConsumer(config ConsumerConfig, topics []*Topic, log *logger.UPPLogger) (*Consumer, error) {
-	consumerGroup, err := newConsumerGroup(config)
+	if config.Options == nil {
+		config.Options = DefaultConsumerOptions()
+	}
+
+	brokers := strings.Split(config.BrokersConnectionString, ",")
+
+	consumerGroup, err := sarama.NewConsumerGroup(brokers, config.ConsumerGroup, config.Options)
 	if err != nil {
 		return nil, fmt.Errorf("creating consumer group: %w", err)
 	}
@@ -152,21 +157,15 @@ func (c *Consumer) Close() error {
 
 // ConnectivityCheck checks whether a connection to Kafka can be established.
 func (c *Consumer) ConnectivityCheck() error {
-	config := ConsumerConfig{
-		BrokersConnectionString: c.config.BrokersConnectionString,
-		ConsumerGroup:           fmt.Sprintf("healthcheck-%d", rand.Intn(100)),
-		Options:                 c.config.Options,
-	}
-	consumerGroup, err := newConsumerGroup(config)
-	if err != nil {
+	brokers := strings.Split(c.config.BrokersConnectionString, ",")
+
+	if err := checkConnectivity(brokers); err != nil {
 		if c.config.ClusterArn != nil {
 			return verifyHealthErrorSeverity(err, c.clusterDescriber, c.config.ClusterArn)
 		}
 
 		return err
 	}
-
-	_ = consumerGroup.Close()
 
 	return nil
 }
@@ -183,15 +182,6 @@ func (c *Consumer) MonitorCheck() error {
 	}
 
 	return nil
-}
-
-func newConsumerGroup(config ConsumerConfig) (sarama.ConsumerGroup, error) {
-	if config.Options == nil {
-		config.Options = DefaultConsumerOptions()
-	}
-
-	brokers := strings.Split(config.BrokersConnectionString, ",")
-	return sarama.NewConsumerGroup(brokers, config.ConsumerGroup, config.Options)
 }
 
 func newConsumerGroupOffsetFetchers(brokerConnectionString string) (consumerOffsetFetcher, topicOffsetFetcher, error) {

@@ -21,7 +21,13 @@ type ProducerConfig struct {
 }
 
 func NewProducer(config ProducerConfig) (*Producer, error) {
-	producer, err := newProducer(config)
+	if config.Options == nil {
+		config.Options = DefaultProducerOptions()
+	}
+
+	brokers := strings.Split(config.BrokersConnectionString, ",")
+
+	producer, err := sarama.NewSyncProducer(brokers, config.Options)
 	if err != nil {
 		return nil, fmt.Errorf("creating producer: %w", err)
 	}
@@ -58,8 +64,9 @@ func (p *Producer) Close() error {
 
 // ConnectivityCheck checks whether a connection to Kafka can be established.
 func (p *Producer) ConnectivityCheck() error {
-	producer, err := newProducer(p.config)
-	if err != nil {
+	brokers := strings.Split(p.config.BrokersConnectionString, ",")
+
+	if err := checkConnectivity(brokers); err != nil {
 		if p.config.ClusterArn != nil {
 			return verifyHealthErrorSeverity(err, p.clusterDescriber, p.config.ClusterArn)
 		}
@@ -67,18 +74,7 @@ func (p *Producer) ConnectivityCheck() error {
 		return err
 	}
 
-	_ = producer.Close()
-
 	return nil
-}
-
-func newProducer(config ProducerConfig) (sarama.SyncProducer, error) {
-	if config.Options == nil {
-		config.Options = DefaultProducerOptions()
-	}
-
-	brokers := strings.Split(config.BrokersConnectionString, ",")
-	return sarama.NewSyncProducer(brokers, config.Options)
 }
 
 // DefaultProducerOptions creates a new Sarama producer configuration with default values.
