@@ -135,6 +135,58 @@ func TestConsumer_Connectivity(t *testing.T) {
 			},
 			expectedErr: "kafka: client has run out of available brokers to talk to",
 		},
+		{
+			name:               "connectivity times out when the cluster is active",
+			requiresConnection: false,
+			newConsumer: func() *Consumer {
+				brokerID := int32(1)
+				broker := sarama.NewMockBroker(t, brokerID)
+				broker.SetLatency(connectivityTimeout + time.Second)
+
+				return &Consumer{
+					config: ConsumerConfig{
+						ClusterArn:              new(string),
+						BrokersConnectionString: broker.Addr(),
+					},
+					clusterDescriber: &clusterDescriberMock{
+						describeCluster: func(ctx context.Context, input *kafka.DescribeClusterV2Input, optFns ...func(*kafka.Options)) (*kafka.DescribeClusterV2Output, error) {
+							return &kafka.DescribeClusterV2Output{
+								ClusterInfo: &types.Cluster{
+									State: types.ClusterStateActive,
+								},
+							}, nil
+						},
+					},
+				}
+			},
+			expectedErr: "kafka connectivity timed out",
+		},
+		{
+			name:               "connectivity timeout is ignored during cluster maintenance",
+			requiresConnection: false,
+			newConsumer: func() *Consumer {
+				brokerID := int32(1)
+				broker := sarama.NewMockBroker(t, brokerID)
+				broker.SetLatency(connectivityTimeout + time.Second)
+
+				return &Consumer{
+					config: ConsumerConfig{
+						ClusterArn:              new(string),
+						BrokersConnectionString: broker.Addr(),
+					},
+					clusterDescriber: &clusterDescriberMock{
+						describeCluster: func(ctx context.Context, input *kafka.DescribeClusterV2Input, optFns ...func(*kafka.Options)) (*kafka.DescribeClusterV2Output, error) {
+							return &kafka.DescribeClusterV2Output{
+								ClusterInfo: &types.Cluster{
+									State: types.ClusterStateMaintenance,
+								},
+							}, nil
+						},
+					},
+				}
+			},
+			expectedErr: "",
+		},
 	}
 
 	for _, test := range tests {
