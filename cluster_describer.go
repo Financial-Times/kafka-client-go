@@ -12,7 +12,7 @@ import (
 
 const (
 	clusterConfigTimeout      = 5 * time.Second
-	clusterDescriptionTimeout = 10 * time.Second
+	clusterDescriptionTimeout = 2 * time.Second
 )
 
 type clusterDescriber interface {
