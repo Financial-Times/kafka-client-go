@@ -161,7 +161,7 @@ func (c *Consumer) ConnectivityCheck() error {
 
 	if err := checkConnectivity(brokers); err != nil {
 		if c.config.ClusterArn != nil {
-			return verifyHealthErrorSeverity(err, c.clusterDescriber, c.config.ClusterArn)
+			return verifyHealthErrorSeverity(err, c.clusterDescriber, *c.config.ClusterArn)
 		}
 
 		return err
@@ -175,7 +175,7 @@ func (c *Consumer) MonitorCheck() error {
 	err := c.monitor.consumerStatus()
 	if err != nil {
 		if err == ErrUnknownConsumerStatus && c.config.ClusterArn != nil {
-			return verifyHealthErrorSeverity(err, c.clusterDescriber, c.config.ClusterArn)
+			return verifyHealthErrorSeverity(err, c.clusterDescriber, *c.config.ClusterArn)
 		}
 
 		return err

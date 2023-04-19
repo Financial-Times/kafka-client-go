@@ -68,7 +68,7 @@ func (p *Producer) ConnectivityCheck() error {
 
 	if err := checkConnectivity(brokers); err != nil {
 		if p.config.ClusterArn != nil {
-			return verifyHealthErrorSeverity(err, p.clusterDescriber, p.config.ClusterArn)
+			return verifyHealthErrorSeverity(err, p.clusterDescriber, *p.config.ClusterArn)
 		}
 
 		return err

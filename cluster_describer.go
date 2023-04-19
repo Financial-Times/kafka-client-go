@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws/arn"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/kafka"
 	"github.com/aws/aws-sdk-go-v2/service/kafka/types"
@@ -19,7 +20,12 @@ type clusterDescriber interface {
 	DescribeClusterV2(ctx context.Context, input *kafka.DescribeClusterV2Input, optFns ...func(*kafka.Options)) (*kafka.DescribeClusterV2Output, error)
 }
 
-func newClusterDescriber(arn *string) (clusterDescriber, error) {
+func newClusterDescriber(clusterArn *string) (clusterDescriber, error) {
+	parsedARN, err := arn.Parse(*clusterArn)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing cluster ARN: %w", err)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), clusterConfigTimeout)
 	defer cancel()
 
@@ -27,11 +33,12 @@ func newClusterDescriber(arn *string) (clusterDescriber, error) {
 	if err != nil {
 		return nil, fmt.Errorf("loading config: %w", err)
 	}
+	cfg.Region = parsedARN.Region
 
 	client := kafka.NewFromConfig(cfg)
 
 	// Ensure the client is properly configured.
-	if _, err = retrieveClusterState(client, arn); err != nil {
+	if _, err = retrieveClusterState(client, *clusterArn); err != nil {
 		return nil, fmt.Errorf("retrieving cluster state: %w", err)
 	}
 
@@ -40,8 +47,8 @@ func newClusterDescriber(arn *string) (clusterDescriber, error) {
 
 // Verifies whether the Kafka cluster is available or not.
 // False positive healthcheck errors are being ignored during maintenance windows.
-func verifyHealthErrorSeverity(healthErr error, describer clusterDescriber, arn *string) error {
-	state, stateErr := retrieveClusterState(describer, arn)
+func verifyHealthErrorSeverity(healthErr error, describer clusterDescriber, clusterArn string) error {
+	state, stateErr := retrieveClusterState(describer, clusterArn)
 	if stateErr != nil {
 		return fmt.Errorf("cluster status is unknown: %w", stateErr)
 	}
@@ -53,12 +60,20 @@ func verifyHealthErrorSeverity(healthErr error, describer clusterDescriber, arn 
 	return healthErr
 }
 
-func retrieveClusterState(describer clusterDescriber, arn *string) (types.ClusterState, error) {
+func retrieveClusterState(describer clusterDescriber, clusterArn string) (types.ClusterState, error) {
+	parsedARN, err := arn.Parse(clusterArn)
+	if err != nil {
+		return "", fmt.Errorf("error parsing cluster ARN: %w", err)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), clusterDescriptionTimeout)
 	defer cancel()
 
+	arnAsString := parsedARN.String()
 	cluster, err := describer.DescribeClusterV2(ctx, &kafka.DescribeClusterV2Input{
-		ClusterArn: arn,
+		ClusterArn: &arnAsString,
+	}, func(opt *kafka.Options) {
+		opt.Region = parsedARN.Region
 	})
 	if err != nil {
 		return "", err
