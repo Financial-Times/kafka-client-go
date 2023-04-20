@@ -21,11 +21,6 @@ type clusterDescriber interface {
 }
 
 func newClusterDescriber(clusterArn *string) (clusterDescriber, error) {
-	parsedARN, err := arn.Parse(*clusterArn)
-	if err != nil {
-		return nil, fmt.Errorf("error parsing cluster ARN: %w", err)
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), clusterConfigTimeout)
 	defer cancel()
 
@@ -33,12 +28,11 @@ func newClusterDescriber(clusterArn *string) (clusterDescriber, error) {
 	if err != nil {
 		return nil, fmt.Errorf("loading config: %w", err)
 	}
-	cfg.Region = parsedARN.Region
 
 	client := kafka.NewFromConfig(cfg)
 
 	// Ensure the client is properly configured.
-	if _, err = retrieveClusterState(client, *clusterArn); err != nil {
+	if _, err = retrieveClusterState(client, clusterArn); err != nil {
 		return nil, fmt.Errorf("retrieving cluster state: %w", err)
 	}
 
@@ -48,7 +42,7 @@ func newClusterDescriber(clusterArn *string) (clusterDescriber, error) {
 // Verifies whether the Kafka cluster is available or not.
 // False positive healthcheck errors are being ignored during maintenance windows.
 func verifyHealthErrorSeverity(healthErr error, describer clusterDescriber, clusterArn string) error {
-	state, stateErr := retrieveClusterState(describer, clusterArn)
+	state, stateErr := retrieveClusterState(describer, &clusterArn)
 	if stateErr != nil {
 		return fmt.Errorf("cluster status is unknown: %w", stateErr)
 	}
@@ -60,8 +54,8 @@ func verifyHealthErrorSeverity(healthErr error, describer clusterDescriber, clus
 	return healthErr
 }
 
-func retrieveClusterState(describer clusterDescriber, clusterArn string) (types.ClusterState, error) {
-	parsedARN, err := arn.Parse(clusterArn)
+func retrieveClusterState(describer clusterDescriber, clusterArn *string) (types.ClusterState, error) {
+	parsedARN, err := arn.Parse(*clusterArn)
 	if err != nil {
 		return "", fmt.Errorf("error parsing cluster ARN: %w", err)
 	}
