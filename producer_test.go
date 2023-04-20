@@ -82,7 +82,7 @@ func TestProducer_Connectivity(t *testing.T) {
 			newProducer: func() *Producer {
 				return &Producer{
 					config: ProducerConfig{
-						ClusterArn:              new(string),
+						ClusterArn:              strAsPtr(testARN),
 						BrokersConnectionString: "unknown:9092",
 					},
 					clusterDescriber: &clusterDescriberMock{
@@ -100,7 +100,7 @@ func TestProducer_Connectivity(t *testing.T) {
 			newProducer: func() *Producer {
 				return &Producer{
 					config: ProducerConfig{
-						ClusterArn:              new(string),
+						ClusterArn:              strAsPtr(testARN),
 						BrokersConnectionString: "unknown:9092",
 					},
 					clusterDescriber: &clusterDescriberMock{
@@ -122,7 +122,7 @@ func TestProducer_Connectivity(t *testing.T) {
 			newProducer: func() *Producer {
 				return &Producer{
 					config: ProducerConfig{
-						ClusterArn:              new(string),
+						ClusterArn:              strAsPtr(testARN),
 						BrokersConnectionString: "unknown:9092",
 					},
 					clusterDescriber: &clusterDescriberMock{
@@ -148,7 +148,7 @@ func TestProducer_Connectivity(t *testing.T) {
 
 				return &Producer{
 					config: ProducerConfig{
-						ClusterArn:              new(string),
+						ClusterArn:              strAsPtr(testARN),
 						BrokersConnectionString: broker.Addr(),
 					},
 					clusterDescriber: &clusterDescriberMock{
@@ -174,7 +174,7 @@ func TestProducer_Connectivity(t *testing.T) {
 
 				return &Producer{
 					config: ProducerConfig{
-						ClusterArn:              new(string),
+						ClusterArn:              strAsPtr(testARN),
 						BrokersConnectionString: broker.Addr(),
 					},
 					clusterDescriber: &clusterDescriberMock{
