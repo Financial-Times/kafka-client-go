@@ -5,13 +5,13 @@ go 1.18
 require (
 	github.com/Financial-Times/go-logger/v2 v2.0.1
 	github.com/Shopify/sarama v1.38.1
+	github.com/aws/aws-sdk-go-v2 v1.17.8
 	github.com/aws/aws-sdk-go-v2/config v1.18.11
 	github.com/aws/aws-sdk-go-v2/service/kafka v1.19.0
 	github.com/stretchr/testify v1.8.1
 )
 
 require (
-	github.com/aws/aws-sdk-go-v2 v1.17.3 // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.13.11 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.12.21 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.1.27 // indirect

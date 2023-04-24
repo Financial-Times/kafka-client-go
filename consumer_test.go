@@ -17,11 +17,16 @@ import (
 )
 
 const testConsumerGroup = "testGroup"
+const testARN = "arn:aws:kafka:eu-west-1:123456789012:cluster/testCluster/12345678-1234-1234-1234-123456789012-1"
 
 var testMessages = []*sarama.ConsumerMessage{{Value: []byte("Message1")}, {Value: []byte("Message2")}}
 
 type clusterDescriberMock struct {
 	describeCluster func(ctx context.Context, input *kafka.DescribeClusterV2Input, optFns ...func(*kafka.Options)) (*kafka.DescribeClusterV2Output, error)
+}
+
+func strAsPtr(s string) *string {
+	return &s
 }
 
 func (cd *clusterDescriberMock) DescribeClusterV2(ctx context.Context, input *kafka.DescribeClusterV2Input, optFns ...func(*kafka.Options)) (*kafka.DescribeClusterV2Output, error) {
@@ -79,7 +84,7 @@ func TestConsumer_Connectivity(t *testing.T) {
 			newConsumer: func() *Consumer {
 				return &Consumer{
 					config: ConsumerConfig{
-						ClusterArn:              new(string),
+						ClusterArn:              strAsPtr(testARN),
 						BrokersConnectionString: "unknown:9092",
 					},
 					clusterDescriber: &clusterDescriberMock{
@@ -97,7 +102,7 @@ func TestConsumer_Connectivity(t *testing.T) {
 			newConsumer: func() *Consumer {
 				return &Consumer{
 					config: ConsumerConfig{
-						ClusterArn:              new(string),
+						ClusterArn:              strAsPtr(testARN),
 						BrokersConnectionString: "unknown:9092",
 					},
 					clusterDescriber: &clusterDescriberMock{
@@ -119,7 +124,7 @@ func TestConsumer_Connectivity(t *testing.T) {
 			newConsumer: func() *Consumer {
 				return &Consumer{
 					config: ConsumerConfig{
-						ClusterArn:              new(string),
+						ClusterArn:              strAsPtr(testARN),
 						BrokersConnectionString: "unknown:9092",
 					},
 					clusterDescriber: &clusterDescriberMock{
@@ -145,7 +150,7 @@ func TestConsumer_Connectivity(t *testing.T) {
 
 				return &Consumer{
 					config: ConsumerConfig{
-						ClusterArn:              new(string),
+						ClusterArn:              strAsPtr(testARN),
 						BrokersConnectionString: broker.Addr(),
 					},
 					clusterDescriber: &clusterDescriberMock{
@@ -171,7 +176,7 @@ func TestConsumer_Connectivity(t *testing.T) {
 
 				return &Consumer{
 					config: ConsumerConfig{
-						ClusterArn:              new(string),
+						ClusterArn:              strAsPtr(testARN),
 						BrokersConnectionString: broker.Addr(),
 					},
 					clusterDescriber: &clusterDescriberMock{
