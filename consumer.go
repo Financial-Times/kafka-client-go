@@ -184,6 +184,48 @@ func (c *Consumer) MonitorCheck() error {
 	return nil
 }
 
+func (c *Consumer) DynamicMonitorCheck() error {
+	if len(c.monitor.subscriptions) == 0 {
+		return fmt.Errorf("Consumer is not currently subscribed for any topics")
+	}
+
+	offsets, err := c.monitor.fetchOffsets()
+	if err != nil {
+		// It's necessary to restart the connection due to:
+		// * bug producing broken pipe errors: https://github.com/Shopify/sarama/issues/1796;
+		// * consumer rebalancing causing coordinator errors;
+		// * other issues unknown at this point and time
+		consumerOffsetFetcher, topicOffsetFetcher, err := newConsumerGroupOffsetFetchers(c.monitor.connectionString)
+		if err != nil {
+			c.monitor.clearConsumerStatus()
+		}
+
+		// Terminate the old connection and replace it.
+		_ = c.monitor.consumerOffsetFetcher.Close()
+
+		c.monitor.consumerOffsetFetcher = consumerOffsetFetcher
+		c.monitor.topicOffsetFetcher = topicOffsetFetcher
+
+		// Re-attempt to fetch offsets and clear the status on failure.
+		offsets, err = c.monitor.fetchOffsets()
+		if err != nil {
+			c.monitor.clearConsumerStatus()
+		}
+	}
+	c.monitor.updateConsumerStatus(offsets)
+
+	err = c.monitor.consumerStatus()
+	if err != nil {
+		if err == ErrUnknownConsumerStatus && c.config.ClusterArn != nil {
+			return verifyHealthErrorSeverity(err, c.clusterDescriber, c.config.ClusterArn)
+		}
+
+		return err
+	}
+
+	return nil
+}
+
 func newConsumerGroupOffsetFetchers(brokerConnectionString string) (consumerOffsetFetcher, topicOffsetFetcher, error) {
 	brokers := strings.Split(brokerConnectionString, ",")
 	client, err := sarama.NewClient(brokers, sarama.NewConfig())
