@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/Financial-Times/go-logger/v2"
-	"github.com/Shopify/sarama"
+	"github.com/IBM/sarama"
 	"github.com/aws/aws-sdk-go-v2/service/kafka"
 	"github.com/aws/aws-sdk-go-v2/service/kafka/types"
 	"github.com/stretchr/testify/assert"

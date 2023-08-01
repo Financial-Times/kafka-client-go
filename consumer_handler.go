@@ -1,6 +1,6 @@
 package kafka
 
-import "github.com/Shopify/sarama"
+import "github.com/IBM/sarama"
 
 // consumerHandler represents a Sarama consumer group consumer.
 type consumerHandler struct {

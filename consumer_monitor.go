@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/Financial-Times/go-logger/v2"
-	"github.com/Shopify/sarama"
+	"github.com/IBM/sarama"
 )
 
 var ErrUnknownConsumerStatus = fmt.Errorf("consumer status is unknown")
