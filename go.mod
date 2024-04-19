@@ -1,6 +1,6 @@
 module github.com/Financial-Times/kafka-client-go/v4
 
-go 1.18
+go 1.22
 
 require (
 	github.com/Financial-Times/go-logger/v2 v2.0.1
