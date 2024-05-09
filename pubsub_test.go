@@ -51,7 +51,7 @@ func TestE2EPubSub(t *testing.T) {
 		assert.NoError(t, producer.SendMessage(message))
 	}
 
-	time.Sleep(time.Second) // Let message handling take place.
+	time.Sleep(5 * time.Second) // Let message handling take place.
 
 	consumedMessagesLock.RLock()
 	assert.Equal(t, producedMessages, consumedMessages)
