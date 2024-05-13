@@ -27,7 +27,7 @@ Creating a producer:
         BrokersConnectionString: "", // Comma-separated list of Kafka brokers
         Topic:                   "", // Topic to publish to 
     }
-	
+ 
     producer, err := kafka.NewProducer(config) 
     // Error handling
 ```
@@ -73,7 +73,7 @@ Creating a consumer:
         kafka.NewTopic(""),                             // Topic to consume from
         kafka.NewTopic("", kafka.WithLagTolerance(50)), // Topic to consume from with custom lag tolerance used for monitoring
     }
-	
+ 
     logger := logger.NewUPPLogger(...)
 
     consumer, err := kafka.NewConsumer(config, topics, logger)
@@ -119,4 +119,17 @@ Connections should be closed by the client:
     go test --race -v ./...
 ```
 
-NB: Some tests in this project require a local Kafka (port 29092). Use the `-short` flag in order to omit those.
+Nota bene: Some tests in this project require a local Kafka (listening on port 29092).
+Use the `-short` flag in order to omit those tests.
+
+Or before executing the tests locally, to start kafka cluster in docker containers and satisfy the test requirement, execute command:
+
+```shell
+    docker compose -f docker-compose.yml up -d --build
+```
+
+And map host `unknown` to a valid IP address in your local /etc/hosts file (e.g. to IP: 127.0.0.1), as the tests require this host name to be valid.
+
+```shell
+127.0.0.1 unknown
+```
