@@ -7,10 +7,10 @@ jobs:
   build:
     docker:
       - image: golang:1
-      - image: confluentinc/cp-zookeeper:6.2.4
+      - image: confluentinc/cp-zookeeper:7.2.15
         environment:
           ZOOKEEPER_CLIENT_PORT: 2181
-      - image: confluentinc/cp-kafka:6.2.4
+      - image: confluentinc/cp-kafka:7.2.15
         environment:
           KAFKA_ZOOKEEPER_CONNECT: localhost:2181
           KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:29092
