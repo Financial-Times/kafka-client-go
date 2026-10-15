@@ -2,6 +2,7 @@ package kafka
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -125,10 +126,26 @@ func (c *Consumer) consumeMessages(ctx context.Context, topics []string, handler
 //
 // Close() calls will terminate both the message consumption and the consumer monitoring processes.
 func (c *Consumer) Start(messageHandler func(message FTMessage)) {
-	ctx, cancel := context.WithCancel(context.Background())
-	subscriptions := make(chan *subscriptionEvent, 50)
+	c.start(newConsumerHandler(c.logger, make(chan *subscriptionEvent, 50), messageHandler, nil, nil))
+}
 
-	handler := newConsumerHandler(subscriptions, messageHandler)
+// StartWithErrorHandler starts message consumption using an error-returning handler.
+// A message is marked only after the handler returns nil. If the handler returns
+// an error, that message is retried with capped backoff and no later message from
+// its partition is processed until it succeeds or the consumer session ends.
+//
+// All instances in a consumer group using this API must be deployed together:
+// instances using Start still acknowledge messages even when another instance
+// fails to handle them. An optional retry config overrides the default delays;
+// pass nil to use the defaults. Non-positive delays use their defaults, and if
+// MaxDelay is less than InitialDelay, InitialDelay is reduced to MaxDelay.
+func (c *Consumer) StartWithErrorHandler(messageHandler func(message FTMessage) error, retryConfig *ErrorHandlerRetryConfig) {
+	c.start(newConsumerHandler(c.logger, make(chan *subscriptionEvent, 50), nil, messageHandler, retryConfig))
+}
+
+func (c *Consumer) start(handler *consumerHandler) {
+	ctx, cancel := context.WithCancel(context.Background())
+	subscriptions := handler.subscriptions
 
 	topics := make([]string, 0, len(c.topics))
 	for _, topic := range c.topics {
@@ -174,7 +191,7 @@ func (c *Consumer) ConnectivityCheck() error {
 func (c *Consumer) MonitorCheck() error {
 	err := c.monitor.consumerStatus()
 	if err != nil {
-		if err == ErrUnknownConsumerStatus && c.config.ClusterArn != nil {
+		if errors.Is(err, ErrUnknownConsumerStatus) && c.config.ClusterArn != nil {
 			return verifyHealthErrorSeverity(err, c.clusterDescriber, c.config.ClusterArn)
 		}
 
