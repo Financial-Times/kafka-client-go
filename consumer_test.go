@@ -291,7 +291,8 @@ func (cg *mockConsumerGroup) Consume(_ context.Context, _ []string, handler sara
 }
 
 type mockConsumerGroupSession struct {
-	ctx context.Context
+	ctx   context.Context
+	marks []*sarama.ConsumerMessage
 }
 
 func (m *mockConsumerGroupSession) Claims() map[string][]int32 {
@@ -312,7 +313,9 @@ func (m *mockConsumerGroupSession) Commit() {}
 
 func (m *mockConsumerGroupSession) ResetOffset(string, int32, int64, string) {}
 
-func (m *mockConsumerGroupSession) MarkMessage(*sarama.ConsumerMessage, string) {}
+func (m *mockConsumerGroupSession) MarkMessage(message *sarama.ConsumerMessage, _ string) {
+	m.marks = append(m.marks, message)
+}
 
 func (m *mockConsumerGroupSession) Context() context.Context {
 	return m.ctx
@@ -348,7 +351,143 @@ func TestConsumer_Workflow(t *testing.T) {
 
 	time.Sleep(1 * time.Second) // Let message handling take place.
 
-	assert.Equal(t, int32(len(testMessages)), atomic.LoadInt32(&count))
+	assert.Equal(t, len(testMessages), int(atomic.LoadInt32(&count)))
 
 	assert.NoError(t, consumer.Close())
+}
+
+func TestConsumer_WorkflowWithErrorHandlerAndDefaultRetryConfig(t *testing.T) {
+	var count int32
+	consumer := newMockConsumer()
+
+	consumer.StartWithErrorHandler(func(msg FTMessage) error {
+		atomic.AddInt32(&count, 1)
+		return nil
+	}, nil)
+
+	time.Sleep(time.Second) // Let message handling take place.
+
+	assert.Equal(t, len(testMessages), int(atomic.LoadInt32(&count)))
+	assert.NoError(t, consumer.Close())
+}
+
+func TestConsumerHandler_ErrorHandlerRetriesInOrderWithCappedBackoff(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	session := &mockConsumerGroupSession{ctx: ctx}
+	messages := make(chan *sarama.ConsumerMessage, 2)
+	first := &sarama.ConsumerMessage{Topic: "topic", Partition: 0, Offset: 10, Value: []byte("\r\n\r\nfirst")}
+	second := &sarama.ConsumerMessage{Topic: "topic", Partition: 0, Offset: 11, Value: []byte("\r\n\r\nsecond")}
+	messages <- first
+	messages <- second
+	claim := &mockConsumerGroupClaim{messages: messages}
+	log := logger.NewUPPLogger("test", "INFO")
+	var calls []int64
+	var retryDelays []time.Duration
+	firstAttempts := 0
+	secondAttempts := 0
+	processed := make(chan struct{})
+	handler := newConsumerHandler(log, make(chan *subscriptionEvent, 2), nil, func(message FTMessage) error {
+		switch message.Body {
+		case "first":
+			calls = append(calls, 10)
+			firstAttempts++
+			if firstAttempts < 8 {
+				return fmt.Errorf("temporary write failure")
+			}
+		case "second":
+			if len(session.marks) != 1 || session.marks[0] != first {
+				t.Errorf("later offset handled before the earlier message was marked: marks=%v", session.marks)
+			}
+			calls = append(calls, 11)
+			secondAttempts++
+			if secondAttempts == 1 {
+				return fmt.Errorf("temporary write failure")
+			}
+			close(processed)
+		}
+		return nil
+	}, &ErrorHandlerRetryConfig{InitialDelay: 5 * time.Millisecond, MaxDelay: 10 * time.Millisecond})
+	handler.retryWait = func(ctx context.Context, delay time.Duration) bool {
+		retryDelays = append(retryDelays, delay)
+		return ctx.Err() == nil
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = handler.ConsumeClaim(session, claim)
+	}()
+	select {
+	case <-processed:
+	case <-time.After(time.Second):
+		cancel()
+		t.Fatal("handler did not finish retries")
+	}
+	cancel()
+	<-done
+
+	assert.Equal(t, []int64{10, 10, 10, 10, 10, 10, 10, 10, 11, 11}, calls)
+	require.Len(t, session.marks, 2)
+	assert.Same(t, first, session.marks[0])
+	assert.Same(t, second, session.marks[1])
+	assert.Equal(t, []time.Duration{
+		5 * time.Millisecond, 10 * time.Millisecond, 10 * time.Millisecond, 10 * time.Millisecond,
+		10 * time.Millisecond, 10 * time.Millisecond, 10 * time.Millisecond, // capped retries
+		5 * time.Millisecond, // reset after the first message succeeds
+	}, retryDelays)
+}
+
+func TestConsumerHandler_ErrorHandlerFailureIsReplayedOnNewSession(t *testing.T) {
+	message := &sarama.ConsumerMessage{Topic: "topic", Partition: 0, Offset: 42, Value: []byte("body")}
+	firstCtx, firstCancel := context.WithCancel(context.Background())
+	firstSession := &mockConsumerGroupSession{ctx: firstCtx}
+	firstCalls := 0
+	firstHandler := newConsumerHandler(nil, make(chan *subscriptionEvent, 2), nil, func(FTMessage) error {
+		firstCalls++
+		firstCancel()
+		return fmt.Errorf("write failed")
+	}, &ErrorHandlerRetryConfig{InitialDelay: time.Millisecond, MaxDelay: time.Millisecond})
+	_ = firstHandler.ConsumeClaim(firstSession, &mockConsumerGroupClaim{messages: messageChannel(message)})
+	assert.Equal(t, 1, firstCalls)
+	assert.Empty(t, firstSession.marks)
+
+	secondCtx, secondCancel := context.WithCancel(context.Background())
+	secondSession := &mockConsumerGroupSession{ctx: secondCtx}
+	secondHandler := newConsumerHandler(nil, make(chan *subscriptionEvent, 2), nil, func(FTMessage) error {
+		secondCancel()
+		return nil
+	}, nil)
+	_ = secondHandler.ConsumeClaim(secondSession, &mockConsumerGroupClaim{messages: messageChannel(message)})
+	require.Len(t, secondSession.marks, 1)
+	assert.Same(t, message, secondSession.marks[0])
+}
+
+func TestConsumerHandler_RetryDelaysAreConfigurable(t *testing.T) {
+	newHandler := func(config *ErrorHandlerRetryConfig) *consumerHandler {
+		return newConsumerHandler(nil, make(chan *subscriptionEvent, 1), nil, func(FTMessage) error { return nil }, config)
+	}
+
+	defaults := newHandler(nil)
+	assert.Equal(t, time.Second, defaults.retryInitial)
+	assert.Equal(t, 30*time.Second, defaults.retryMax)
+
+	custom := newHandler(&ErrorHandlerRetryConfig{
+		InitialDelay: 250 * time.Millisecond,
+		MaxDelay:     4 * time.Second,
+	})
+	assert.Equal(t, 250*time.Millisecond, custom.retryInitial)
+	assert.Equal(t, 4*time.Second, custom.retryMax)
+
+	clamped := newHandler(&ErrorHandlerRetryConfig{
+		InitialDelay: 2 * time.Second,
+		MaxDelay:     time.Second,
+	})
+	assert.Equal(t, time.Second, clamped.retryInitial)
+	assert.Equal(t, time.Second, clamped.retryMax)
+}
+
+func messageChannel(message *sarama.ConsumerMessage) chan *sarama.ConsumerMessage {
+	messages := make(chan *sarama.ConsumerMessage, 1)
+	messages <- message
+	return messages
 }

@@ -92,6 +92,39 @@ Consuming messages:
     consumer.Start(handler)
 ```
 
+Use `StartWithErrorHandler` when message processing can fail:
+
+```go
+    handler := func(message kafka.FTMessage) error {
+        return writeVersion(message)
+    }
+
+    consumer.StartWithErrorHandler(handler, nil)
+```
+
+The consumer marks a message only after the handler returns `nil`. Return `nil`
+for a message you intentionally skip. On error, it retries that message after
+one second, doubling the delay up to 30 seconds by default. It does not process
+later messages in that partition until the handler succeeds. If the session ends
+first, Kafka can deliver the unmarked message again. Make handlers safe to retry
+if their write may have succeeded before the session ended.
+
+Pass an `ErrorHandlerRetryConfig` pointer to change the retry delays:
+
+```go
+    consumer.StartWithErrorHandler(handler, &kafka.ErrorHandlerRetryConfig{
+        InitialDelay: time.Second,
+        MaxDelay:     10 * time.Second,
+    })
+```
+
+Non-positive values use the defaults. If the configured maximum is lower than
+the initial delay, the initial delay is reduced to the maximum.
+
+All instances in a consumer group must use `StartWithErrorHandler` together. An
+instance still using `Start` could receive the partition after a rebalance and
+acknowledge a message without checking whether its processing succeeded.
+
 The health of the Kafka cluster can be checked by attempting to establish separate connection with the provided configuration:
 
 ```go
