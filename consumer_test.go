@@ -217,10 +217,11 @@ func TestConsumer_Connectivity(t *testing.T) {
 
 type mockConsumerGroupClaim struct {
 	messages chan *sarama.ConsumerMessage
+	topic    string
 }
 
 func (c *mockConsumerGroupClaim) Topic() string {
-	return ""
+	return c.topic
 }
 
 func (c *mockConsumerGroupClaim) Partition() int32 {
@@ -379,7 +380,7 @@ func TestConsumerHandler_ErrorHandlerRetriesInOrderWithCappedBackoff(t *testing.
 	second := &sarama.ConsumerMessage{Topic: "topic", Partition: 0, Offset: 11, Value: []byte("\r\n\r\nsecond")}
 	messages <- first
 	messages <- second
-	claim := &mockConsumerGroupClaim{messages: messages}
+	claim := &mockConsumerGroupClaim{messages: messages, topic: "topic"}
 	log := logger.NewUPPLogger("test", "INFO")
 	var calls []int64
 	var retryDelays []time.Duration
@@ -387,6 +388,13 @@ func TestConsumerHandler_ErrorHandlerRetriesInOrderWithCappedBackoff(t *testing.
 	secondAttempts := 0
 	processed := make(chan struct{})
 	handler := newConsumerHandler(log, make(chan *subscriptionEvent, 2), nil, func(message FTMessageWithMetadata) error {
+		expectedOffset := int64(10)
+		if message.Body == "second" {
+			expectedOffset = 11
+		}
+		if message.Topic != "topic" || message.Partition != 0 || message.Offset != expectedOffset {
+			t.Errorf("unexpected Kafka position: topic=%q partition=%d offset=%d, want topic=%q partition=0 offset=%d", message.Topic, message.Partition, message.Offset, "topic", expectedOffset)
+		}
 		switch message.Body {
 		case "first":
 			calls = append(calls, 10)
