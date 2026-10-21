@@ -95,8 +95,9 @@ Consuming messages:
 Use `StartWithErrorHandler` when message processing can fail:
 
 ```go
-    handler := func(message kafka.FTMessage) error {
-        return writeVersion(message)
+    handler := func(message kafka.FTMessageWithMetadata) error {
+        log.WithField("partition", message.Partition).WithField("offset", message.Offset).Info("Processing Kafka message")
+        return writeVersion(message.FTMessage)
     }
 
     consumer.StartWithErrorHandler(handler, nil)
@@ -119,7 +120,9 @@ Pass an `ErrorHandlerRetryConfig` pointer to change the retry delays:
 ```
 
 Non-positive values use the defaults. If the configured maximum is lower than
-the initial delay, the initial delay is reduced to the maximum.
+the initial delay, the initial delay is reduced to the maximum. The handler
+receives `FTMessageWithMetadata`, which embeds the original `FTMessage` and adds
+the Kafka partition and offset. The `Start` API continues to receive `FTMessage`.
 
 All instances in a consumer group must use `StartWithErrorHandler` together. An
 instance still using `Start` could receive the partition after a rebalance and

@@ -12,6 +12,13 @@ type FTMessage struct {
 	Topic   string
 }
 
+// FTMessageWithMetadata contains a consumed FT message and its Kafka position.
+type FTMessageWithMetadata struct {
+	FTMessage
+	Partition int32
+	Offset    int64
+}
+
 func NewFTMessage(headers map[string]string, body string) FTMessage {
 	return FTMessage{
 		Headers: headers,
@@ -46,9 +53,9 @@ func rawToFTMessage(msg []byte, topic string) FTMessage {
 	}
 }
 
-var re = regexp.MustCompile("[\\w-]*:[\\w\\-:/.+;= ]*")
-var kre = regexp.MustCompile("[\\w-]*:")
-var vre = regexp.MustCompile(":[\\w-:/.+;= ]*")
+var re = regexp.MustCompile(`[\w-]*:[\w\-:/.+;= ]*`)
+var kre = regexp.MustCompile(`[\w-]*:`)
+var vre = regexp.MustCompile(`:[\w-:/.+;= ]*`)
 
 func getHeaderSectionEndingIndex(msg string) int {
 	//FT msg format uses CRLF for line endings

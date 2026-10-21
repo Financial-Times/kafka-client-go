@@ -360,7 +360,7 @@ func TestConsumer_WorkflowWithErrorHandlerAndDefaultRetryConfig(t *testing.T) {
 	var count int32
 	consumer := newMockConsumer()
 
-	consumer.StartWithErrorHandler(func(msg FTMessage) error {
+	consumer.StartWithErrorHandler(func(msg FTMessageWithMetadata) error {
 		atomic.AddInt32(&count, 1)
 		return nil
 	}, nil)
@@ -386,7 +386,7 @@ func TestConsumerHandler_ErrorHandlerRetriesInOrderWithCappedBackoff(t *testing.
 	firstAttempts := 0
 	secondAttempts := 0
 	processed := make(chan struct{})
-	handler := newConsumerHandler(log, make(chan *subscriptionEvent, 2), nil, func(message FTMessage) error {
+	handler := newConsumerHandler(log, make(chan *subscriptionEvent, 2), nil, func(message FTMessageWithMetadata) error {
 		switch message.Body {
 		case "first":
 			calls = append(calls, 10)
@@ -442,7 +442,7 @@ func TestConsumerHandler_ErrorHandlerFailureIsReplayedOnNewSession(t *testing.T)
 	firstCtx, firstCancel := context.WithCancel(context.Background())
 	firstSession := &mockConsumerGroupSession{ctx: firstCtx}
 	firstCalls := 0
-	firstHandler := newConsumerHandler(nil, make(chan *subscriptionEvent, 2), nil, func(FTMessage) error {
+	firstHandler := newConsumerHandler(nil, make(chan *subscriptionEvent, 2), nil, func(FTMessageWithMetadata) error {
 		firstCalls++
 		firstCancel()
 		return fmt.Errorf("write failed")
@@ -453,7 +453,7 @@ func TestConsumerHandler_ErrorHandlerFailureIsReplayedOnNewSession(t *testing.T)
 
 	secondCtx, secondCancel := context.WithCancel(context.Background())
 	secondSession := &mockConsumerGroupSession{ctx: secondCtx}
-	secondHandler := newConsumerHandler(nil, make(chan *subscriptionEvent, 2), nil, func(FTMessage) error {
+	secondHandler := newConsumerHandler(nil, make(chan *subscriptionEvent, 2), nil, func(FTMessageWithMetadata) error {
 		secondCancel()
 		return nil
 	}, nil)
@@ -464,7 +464,7 @@ func TestConsumerHandler_ErrorHandlerFailureIsReplayedOnNewSession(t *testing.T)
 
 func TestConsumerHandler_RetryDelaysAreConfigurable(t *testing.T) {
 	newHandler := func(config *ErrorHandlerRetryConfig) *consumerHandler {
-		return newConsumerHandler(nil, make(chan *subscriptionEvent, 1), nil, func(FTMessage) error { return nil }, config)
+		return newConsumerHandler(nil, make(chan *subscriptionEvent, 1), nil, func(FTMessageWithMetadata) error { return nil }, config)
 	}
 
 	defaults := newHandler(nil)
