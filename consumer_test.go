@@ -260,30 +260,29 @@ func (cg *mockConsumerGroup) PauseAll() {}
 
 func (cg *mockConsumerGroup) ResumeAll() {}
 
-func (cg *mockConsumerGroup) Consume(_ context.Context, _ []string, handler sarama.ConsumerGroupHandler) error {
+func (cg *mockConsumerGroup) Consume(ctx context.Context, _ []string, handler sarama.ConsumerGroupHandler) error {
 	messages := make(chan *sarama.ConsumerMessage, len(cg.messages))
 	for _, message := range cg.messages {
 		messages <- message
 	}
-	defer close(messages)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	sessionCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	session := &mockConsumerGroupSession{
-		ctx: ctx,
+		ctx: sessionCtx,
 	}
 	claim := &mockConsumerGroupClaim{
 		messages: messages,
 	}
 
-	wg := sync.WaitGroup{}
+	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		_ = handler.ConsumeClaim(session, claim)
 	}()
 
-	// Wait for message processing.
-	time.Sleep(time.Second)
+	<-ctx.Done()
 
 	cancel()
 	wg.Wait()
@@ -345,31 +344,50 @@ func newMockConsumer() *Consumer {
 func TestConsumer_Workflow(t *testing.T) {
 	var count int32
 	consumer := newMockConsumer()
+	processed := make(chan struct{}, len(testMessages))
 
 	consumer.Start(func(msg FTMessage) {
 		atomic.AddInt32(&count, 1)
+		processed <- struct{}{}
 	})
 
-	time.Sleep(1 * time.Second) // Let message handling take place.
-
-	assert.Equal(t, len(testMessages), int(atomic.LoadInt32(&count)))
+	for range testMessages {
+		select {
+		case <-processed:
+		case <-time.After(5 * time.Second):
+			assert.NoError(t, consumer.Close())
+			t.Fatal("timed out waiting for message handling")
+		}
+	}
 
 	assert.NoError(t, consumer.Close())
+
+	assert.Equal(t, len(testMessages), int(atomic.LoadInt32(&count)))
 }
 
 func TestConsumer_WorkflowWithErrorHandlerAndDefaultRetryConfig(t *testing.T) {
 	var count int32
 	consumer := newMockConsumer()
+	processed := make(chan struct{}, len(testMessages))
 
 	consumer.StartWithErrorHandler(func(msg FTMessageWithMetadata) error {
 		atomic.AddInt32(&count, 1)
+		processed <- struct{}{}
 		return nil
 	}, nil)
 
-	time.Sleep(time.Second) // Let message handling take place.
+	for range testMessages {
+		select {
+		case <-processed:
+		case <-time.After(5 * time.Second):
+			assert.NoError(t, consumer.Close())
+			t.Fatal("timed out waiting for message handling")
+		}
+	}
+
+	assert.NoError(t, consumer.Close())
 
 	assert.Equal(t, len(testMessages), int(atomic.LoadInt32(&count)))
-	assert.NoError(t, consumer.Close())
 }
 
 func TestConsumerHandler_ErrorHandlerRetriesInOrderWithCappedBackoff(t *testing.T) {
