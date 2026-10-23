@@ -24,14 +24,14 @@ type ErrorHandlerRetryConfig struct {
 type consumerHandler struct {
 	subscriptions chan *subscriptionEvent
 	handler       func(message FTMessage)
-	errorHandler  func(message FTMessage) error
+	errorHandler  func(message FTMessageWithMetadata) error
 	logger        *logger.UPPLogger
 	retryInitial  time.Duration
 	retryMax      time.Duration
 	retryWait     func(context.Context, time.Duration) bool
 }
 
-func newConsumerHandler(log *logger.UPPLogger, subscriptions chan *subscriptionEvent, handler func(message FTMessage), errorHandler func(message FTMessage) error, retryConfig *ErrorHandlerRetryConfig) *consumerHandler {
+func newConsumerHandler(log *logger.UPPLogger, subscriptions chan *subscriptionEvent, handler func(message FTMessage), errorHandler func(message FTMessageWithMetadata) error, retryConfig *ErrorHandlerRetryConfig) *consumerHandler {
 	var retryInitial, retryMax time.Duration
 	if retryConfig != nil {
 		retryInitial = retryConfig.InitialDelay
@@ -90,7 +90,12 @@ func (c *consumerHandler) ConsumeClaim(session sarama.ConsumerGroupSession, clai
 		case message := <-claim.Messages():
 			ftMsg := rawToFTMessage(message.Value, topic)
 			if c.errorHandler != nil {
-				if !c.handleWithRetry(session, message, ftMsg) {
+				messageWithMetadata := FTMessageWithMetadata{
+					FTMessage: ftMsg,
+					Partition: message.Partition,
+					Offset:    message.Offset,
+				}
+				if !c.handleWithRetry(session, message, messageWithMetadata) {
 					return nil
 				}
 				continue
@@ -106,7 +111,7 @@ func (c *consumerHandler) ConsumeClaim(session sarama.ConsumerGroupSession, clai
 
 // handleWithRetry holds the current partition at the failed message. It doesn't
 // read from the claim again until the handler succeeds, preserving offset order.
-func (c *consumerHandler) handleWithRetry(session sarama.ConsumerGroupSession, message *sarama.ConsumerMessage, ftMsg FTMessage) bool {
+func (c *consumerHandler) handleWithRetry(session sarama.ConsumerGroupSession, message *sarama.ConsumerMessage, ftMsg FTMessageWithMetadata) bool {
 	delay := c.retryInitial
 	for {
 		if err := c.errorHandler(ftMsg); err == nil {
