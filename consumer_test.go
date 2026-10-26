@@ -217,10 +217,11 @@ func TestConsumer_Connectivity(t *testing.T) {
 
 type mockConsumerGroupClaim struct {
 	messages chan *sarama.ConsumerMessage
+	topic    string
 }
 
 func (c *mockConsumerGroupClaim) Topic() string {
-	return ""
+	return c.topic
 }
 
 func (c *mockConsumerGroupClaim) Partition() int32 {
@@ -259,30 +260,29 @@ func (cg *mockConsumerGroup) PauseAll() {}
 
 func (cg *mockConsumerGroup) ResumeAll() {}
 
-func (cg *mockConsumerGroup) Consume(_ context.Context, _ []string, handler sarama.ConsumerGroupHandler) error {
+func (cg *mockConsumerGroup) Consume(ctx context.Context, _ []string, handler sarama.ConsumerGroupHandler) error {
 	messages := make(chan *sarama.ConsumerMessage, len(cg.messages))
 	for _, message := range cg.messages {
 		messages <- message
 	}
-	defer close(messages)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	sessionCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	session := &mockConsumerGroupSession{
-		ctx: ctx,
+		ctx: sessionCtx,
 	}
 	claim := &mockConsumerGroupClaim{
 		messages: messages,
 	}
 
-	wg := sync.WaitGroup{}
+	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		_ = handler.ConsumeClaim(session, claim)
 	}()
 
-	// Wait for message processing.
-	time.Sleep(time.Second)
+	<-ctx.Done()
 
 	cancel()
 	wg.Wait()
@@ -344,31 +344,50 @@ func newMockConsumer() *Consumer {
 func TestConsumer_Workflow(t *testing.T) {
 	var count int32
 	consumer := newMockConsumer()
+	processed := make(chan struct{}, len(testMessages))
 
 	consumer.Start(func(msg FTMessage) {
 		atomic.AddInt32(&count, 1)
+		processed <- struct{}{}
 	})
 
-	time.Sleep(1 * time.Second) // Let message handling take place.
-
-	assert.Equal(t, len(testMessages), int(atomic.LoadInt32(&count)))
+	for range testMessages {
+		select {
+		case <-processed:
+		case <-time.After(5 * time.Second):
+			assert.NoError(t, consumer.Close())
+			t.Fatal("timed out waiting for message handling")
+		}
+	}
 
 	assert.NoError(t, consumer.Close())
+
+	assert.Equal(t, len(testMessages), int(atomic.LoadInt32(&count)))
 }
 
 func TestConsumer_WorkflowWithErrorHandlerAndDefaultRetryConfig(t *testing.T) {
 	var count int32
 	consumer := newMockConsumer()
+	processed := make(chan struct{}, len(testMessages))
 
-	consumer.StartWithErrorHandler(func(msg FTMessage) error {
+	consumer.StartWithErrorHandler(func(msg FTMessageWithMetadata) error {
 		atomic.AddInt32(&count, 1)
+		processed <- struct{}{}
 		return nil
 	}, nil)
 
-	time.Sleep(time.Second) // Let message handling take place.
+	for range testMessages {
+		select {
+		case <-processed:
+		case <-time.After(5 * time.Second):
+			assert.NoError(t, consumer.Close())
+			t.Fatal("timed out waiting for message handling")
+		}
+	}
+
+	assert.NoError(t, consumer.Close())
 
 	assert.Equal(t, len(testMessages), int(atomic.LoadInt32(&count)))
-	assert.NoError(t, consumer.Close())
 }
 
 func TestConsumerHandler_ErrorHandlerRetriesInOrderWithCappedBackoff(t *testing.T) {
@@ -379,14 +398,21 @@ func TestConsumerHandler_ErrorHandlerRetriesInOrderWithCappedBackoff(t *testing.
 	second := &sarama.ConsumerMessage{Topic: "topic", Partition: 0, Offset: 11, Value: []byte("\r\n\r\nsecond")}
 	messages <- first
 	messages <- second
-	claim := &mockConsumerGroupClaim{messages: messages}
+	claim := &mockConsumerGroupClaim{messages: messages, topic: "topic"}
 	log := logger.NewUPPLogger("test", "INFO")
 	var calls []int64
 	var retryDelays []time.Duration
 	firstAttempts := 0
 	secondAttempts := 0
 	processed := make(chan struct{})
-	handler := newConsumerHandler(log, make(chan *subscriptionEvent, 2), nil, func(message FTMessage) error {
+	handler := newConsumerHandler(log, make(chan *subscriptionEvent, 2), nil, func(message FTMessageWithMetadata) error {
+		expectedOffset := int64(10)
+		if message.Body == "second" {
+			expectedOffset = 11
+		}
+		if message.Topic != "topic" || message.Partition != 0 || message.Offset != expectedOffset {
+			t.Errorf("unexpected Kafka position: topic=%q partition=%d offset=%d, want topic=%q partition=0 offset=%d", message.Topic, message.Partition, message.Offset, "topic", expectedOffset)
+		}
 		switch message.Body {
 		case "first":
 			calls = append(calls, 10)
@@ -442,7 +468,7 @@ func TestConsumerHandler_ErrorHandlerFailureIsReplayedOnNewSession(t *testing.T)
 	firstCtx, firstCancel := context.WithCancel(context.Background())
 	firstSession := &mockConsumerGroupSession{ctx: firstCtx}
 	firstCalls := 0
-	firstHandler := newConsumerHandler(nil, make(chan *subscriptionEvent, 2), nil, func(FTMessage) error {
+	firstHandler := newConsumerHandler(nil, make(chan *subscriptionEvent, 2), nil, func(FTMessageWithMetadata) error {
 		firstCalls++
 		firstCancel()
 		return fmt.Errorf("write failed")
@@ -453,7 +479,7 @@ func TestConsumerHandler_ErrorHandlerFailureIsReplayedOnNewSession(t *testing.T)
 
 	secondCtx, secondCancel := context.WithCancel(context.Background())
 	secondSession := &mockConsumerGroupSession{ctx: secondCtx}
-	secondHandler := newConsumerHandler(nil, make(chan *subscriptionEvent, 2), nil, func(FTMessage) error {
+	secondHandler := newConsumerHandler(nil, make(chan *subscriptionEvent, 2), nil, func(FTMessageWithMetadata) error {
 		secondCancel()
 		return nil
 	}, nil)
@@ -464,7 +490,7 @@ func TestConsumerHandler_ErrorHandlerFailureIsReplayedOnNewSession(t *testing.T)
 
 func TestConsumerHandler_RetryDelaysAreConfigurable(t *testing.T) {
 	newHandler := func(config *ErrorHandlerRetryConfig) *consumerHandler {
-		return newConsumerHandler(nil, make(chan *subscriptionEvent, 1), nil, func(FTMessage) error { return nil }, config)
+		return newConsumerHandler(nil, make(chan *subscriptionEvent, 1), nil, func(FTMessageWithMetadata) error { return nil }, config)
 	}
 
 	defaults := newHandler(nil)

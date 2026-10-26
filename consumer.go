@@ -130,6 +130,7 @@ func (c *Consumer) Start(messageHandler func(message FTMessage)) {
 }
 
 // StartWithErrorHandler starts message consumption using an error-returning handler.
+// The handler receives the FT message with its Kafka partition and offset.
 // A message is marked only after the handler returns nil. If the handler returns
 // an error, that message is retried with capped backoff and no later message from
 // its partition is processed until it succeeds or the consumer session ends.
@@ -139,7 +140,7 @@ func (c *Consumer) Start(messageHandler func(message FTMessage)) {
 // fails to handle them. An optional retry config overrides the default delays;
 // pass nil to use the defaults. Non-positive delays use their defaults, and if
 // MaxDelay is less than InitialDelay, InitialDelay is reduced to MaxDelay.
-func (c *Consumer) StartWithErrorHandler(messageHandler func(message FTMessage) error, retryConfig *ErrorHandlerRetryConfig) {
+func (c *Consumer) StartWithErrorHandler(messageHandler func(message FTMessageWithMetadata) error, retryConfig *ErrorHandlerRetryConfig) {
 	c.start(newConsumerHandler(c.logger, make(chan *subscriptionEvent, 50), nil, messageHandler, retryConfig))
 }
 
